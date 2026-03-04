@@ -1,0 +1,156 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title><%= title %></title>
+    <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+</head>
+
+<body class="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-100">
+
+  <div class="max-w-4xl mx-auto py-10 px-4">
+
+    <!-- MAIN CARD -->
+    <div class="bg-white/5 backdrop-blur-lg border border-white/10 rounded-2xl shadow-2xl p-8">
+
+      <h1 class="text-3xl font-bold text-center mb-2 tracking-tight">
+        Repository Content Generator
+      </h1>
+
+      <p class="text-center text-slate-400 mb-8 text-sm">
+        Secure AI-powered repository documentation
+      </p>
+
+      <!-- INPUT -->
+      <input
+        type="url"
+        id="githubUrl"
+        class="w-full px-4 py-3 rounded-lg bg-slate-900 border border-slate-700 focus:border-blue-500 focus:ring-2 focus:ring-blue-500 outline-none transition mb-6"
+        placeholder="https://github.com/username/repository"
+      />
+
+      <!-- BUTTON ROW -->
+      <div class="flex gap-3 flex-wrap mb-6">
+
+        <button
+          onclick="fetchRepo()"
+          class="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 active:scale-95 transition rounded-lg font-medium whitespace-nowrap shadow-lg shadow-blue-900/30">
+          Fetch Repo
+        </button>
+
+        <button
+          onclick="buildInput()"
+          class="px-5 py-2.5 bg-yellow-600 hover:bg-yellow-500 active:scale-95 transition rounded-lg font-medium whitespace-nowrap shadow-lg shadow-yellow-900/30">
+          Build Input
+        </button>
+
+        <button
+          onclick="generateDocs()"
+          class="px-5 py-2.5 bg-green-600 hover:bg-green-500 active:scale-95 transition rounded-lg font-medium whitespace-nowrap shadow-lg shadow-green-900/30">
+          Generate Docs
+        </button>
+
+      </div>
+
+      <!-- OUTPUT -->
+      <pre id="output"
+           class="bg-slate-950 border border-slate-800 text-emerald-400 p-4 rounded-xl overflow-auto h-96 text-sm leading-relaxed shadow-inner">
+Ready.
+      </pre>
+  </div>
+
+<script>
+let RAW = null;
+let MESSAGES = null;
+
+// STEP 1
+async function fetchRepo() {
+    try {
+        const githubUrl = document.getElementById('githubUrl').value;
+
+        if (!githubUrl) {
+            alert('Enter a GitHub URL');
+            return;
+        }
+
+        document.getElementById('output').textContent = 'Fetching repository...';
+
+        const res = await fetch('/fetch', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ githubUrl })
+        });
+
+        const data = await res.json();
+
+        RAW = data.rawMarkdown;
+        MESSAGES = null; // reset pipeline
+
+        document.getElementById('output').textContent =
+            'FETCH OK\n\n' + data.preview;
+
+    } catch (err) {
+        document.getElementById('output').textContent =
+            'Fetch failed: ' + err.message;
+    }
+}
+
+// STEP 2
+async function buildInput() {
+    try {
+        if (!RAW) {
+            alert('Run Fetch Repo first');
+            return;
+        }
+
+        document.getElementById('output').textContent = 'Building LLM input...';
+
+        const res = await fetch('/build', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ rawMarkdown: RAW })
+        });
+
+        const data = await res.json();
+
+        MESSAGES = data.messages;
+
+        document.getElementById('output').textContent =
+            'BUILD OK\n\n' + JSON.stringify(data.messages, null, 2);
+
+    } catch (err) {
+        document.getElementById('output').textContent =
+            'Build failed: ' + err.message;
+    }
+}
+
+// STEP 3
+async function generateDocs() {
+    try {
+        if (!MESSAGES) {
+            alert('Run Build Input first');
+            return;
+        }
+
+        document.getElementById('output').textContent = 'Generating documentation...';
+
+        const res = await fetch('/generate-docs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ messages: MESSAGES })
+        });
+
+        const data = await res.json();
+
+        document.getElementById('output').textContent =
+            data.documentation;
+
+    } catch (err) {
+        document.getElementById('output').textContent =
+            'Generation failed: ' + err.message;
+    }
+}
+</script>
+</body>
+</html>
