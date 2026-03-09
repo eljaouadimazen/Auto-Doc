@@ -1,57 +1,58 @@
 require('dotenv').config();
 
-const fetch = require('node-fetch');
-global.fetch = fetch;
+const express    = require('express');
+const path       = require('path');
+const app        = express();
 
-const express = require('express');
-const path = require('path');
 const generatorController = require('./controllers/generator.controller');
+const rateLimiter         = require('./services/rate-limiter.middleware');
 
-const app = express();
-const router = express.Router();
-
-// Middleware
+// ── Middleware ────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-app.use(express.static('public'));
+app.use(express.static(path.join(__dirname, '../public')));
 
-// View engine
+// ── View Engine ───────────────────────────────────────────────────
 app.set('view engine', 'ejs');
 app.set('views', path.join(__dirname, 'views'));
 
-// ===== ROUTES =====
-
-// Debug pipeline
-router.post('/fetch', generatorController.fetchRepo);
-router.post('/build', generatorController.buildInput);
-router.post('/generate-docs', generatorController.generateDocs);
-router.post('/generate', generatorController.generate);
-
-app.use('/', router);
-
-// Optional full pipeline
-app.post('/generate', generatorController.generate);
-// Home page
+// ── Pages ─────────────────────────────────────────────────────────
 app.get('/', (req, res) => {
-  res.render('index', { title: 'Repository Generator' });
+  res.render('index', { title: 'Auto-Doc — Repository Generator' });
 });
-// ===== ERROR HANDLING =====
 
+// ── Pipeline Routes ───────────────────────────────────────────────
+app.post('/fetch',         rateLimiter.fetchLimit,    (req, res) => generatorController.fetchRepo(req, res));
+app.post('/build',         rateLimiter.buildLimit,    (req, res) => generatorController.buildInput(req, res));
+app.post('/generate-docs', rateLimiter.generateLimit, (req, res) => generatorController.generateDocs(req, res));
+app.post('/generate',      rateLimiter.fetchLimit,    (req, res) => generatorController.generate(req, res));
+
+// ── Key Validation ────────────────────────────────────────────────
+app.post('/validate-key', rateLimiter.defaultLimit,  (req, res) => generatorController.validateKey(req, res));
+
+// ── Audit Routes ──────────────────────────────────────────────────
+app.get('/audit', rateLimiter.defaultLimit, (req, res) => generatorController.getAuditLogs(req, res));
+
+// ── Custom Rules Routes ───────────────────────────────────────────
+app.get   ('/rules',      rateLimiter.defaultLimit, (req, res) => generatorController.listRules(req, res));
+app.post  ('/rules',      rateLimiter.defaultLimit, (req, res) => generatorController.addRule(req, res));
+app.delete('/rules/:id',  rateLimiter.defaultLimit, (req, res) => generatorController.removeRule(req, res));
+app.post  ('/rules/test', rateLimiter.defaultLimit, (req, res) => generatorController.testRule(req, res));
+
+// ── 404 ───────────────────────────────────────────────────────────
+app.use((req, res) => {
+  res.status(404).render('error', { message: 'Page not found' });
+});
+
+// ── Error Handler ─────────────────────────────────────────────────
 app.use((err, req, res, next) => {
   console.error(err.stack);
-  res.status(500).render('error', {
-    message: 'An unexpected error occurred. Please try again later.'
-  });
+  res.status(500).render('error', { message: 'An unexpected error occurred.' });
 });
 
-app.use((req, res) => {
-  res.status(404).render('error', {
-    message: 'Page not found'
-  });
-});
-
-// Start server
+// ── Start ─────────────────────────────────────────────────────────
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
+  console.log(`✅ Auto-Doc running at http://localhost:${PORT}`);
+  console.log(`   Groq key: ${process.env.GROQ_API_KEY ? 'loaded from .env' : 'not set — users must provide their own'}`);
 });
