@@ -1,0 +1,98 @@
+name: Auto-Doc — Generate & Publish Documentation
+
+# ── Triggers ──────────────────────────────────────────────────────
+on:
+  push:
+    branches:
+      - main
+      - master
+    paths:
+      # Layer 1: only start if these paths changed
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+
+  # Manual trigger from GitHub Actions UI
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force regeneration even if no structural changes'
+        required: false
+        default: 'false'
+
+# ── Permissions ───────────────────────────────────────────────────
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+# ── Jobs ──────────────────────────────────────────────────────────
+jobs:
+  generate-and-deploy:
+    name: Generate Documentation
+    runs-on: ubuntu-latest
+
+    steps:
+
+      # ── Step 1: Checkout full history ─────────────────────────
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2    # need previous commit for diff comparison
+
+      # ── Step 2: Setup Node ────────────────────────────────────
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      # ── Step 3: Install dependencies ─────────────────────────
+      - name: Install dependencies
+        run: npm ci
+
+      # ── Step 4: Semantic diff check (Layer 2) ─────────────────
+      - name: Semantic diff — detect structural changes
+        id: semantic
+        run: node scripts/semantic-diff.js
+        env:
+          GITHUB_SHA:      ${{ github.sha }}
+          GITHUB_BASE_SHA: ${{ github.event.before }}
+          FORCE:           ${{ github.event.inputs.force || 'false' }}
+
+      # ── Step 5: Generate documentation ───────────────────────
+      - name: Generate documentation
+        if: steps.semantic.outputs.skip == 'false'
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_URL:     ${{ github.server_url }}/${{ github.repository }}
+          GROQ_MODEL:   llama-3.3-70b-versatile
+        run: node scripts/generate-docs-ci.js
+
+      # ── Step 6: Deploy to GitHub Pages ────────────────────────
+      - name: Deploy to GitHub Pages
+        if: steps.semantic.outputs.skip == 'false'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token:   ${{ secrets.GITHUB_TOKEN }}
+          publish_dir:    ./docs
+          publish_branch: gh-pages
+          commit_message: "docs: auto-generated [${{ github.sha }}]"
+
+      # ── Step 7: Pipeline summary ──────────────────────────────
+      - name: Summary
+        run: |
+          if [ "${{ steps.semantic.outputs.skip }}" = "true" ]; then
+            echo "##  Skipped — no structural changes" >> $GITHUB_STEP_SUMMARY
+            echo "Only internal logic was modified. Documentation is still up to date." >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "**Changed files:**" >> $GITHUB_STEP_SUMMARY
+            echo "${{ steps.semantic.outputs.changed_files }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "##  Documentation generated and deployed" >> $GITHUB_STEP_SUMMARY
+            echo "**Structural changes detected in:**" >> $GITHUB_STEP_SUMMARY
+            echo "${{ steps.semantic.outputs.changed_files }}" >> $GITHUB_STEP_SUMMARY
+            echo "" >> $GITHUB_STEP_SUMMARY
+            echo "View at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> $GITHUB_STEP_SUMMARY
+          fi
