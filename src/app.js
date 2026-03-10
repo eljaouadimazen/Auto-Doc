@@ -55,4 +55,4 @@ const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
   console.log(`✅ Auto-Doc running at http://localhost:${PORT}`);
   console.log(`   Groq key: ${process.env.GROQ_API_KEY ? 'loaded from .env' : 'not set — users must provide their own'}`);
-});
+});// trigger CI
