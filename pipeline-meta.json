@@ -1,0 +1,9 @@
+{
+  "generatedAt": "2026-03-10T23:01:23.318Z",
+  "repository": "https://github.com/eljaouadimazen/Auto-Doc",
+  "sourceHash": "unknown",
+  "mode": "ast",
+  "filesAnalyzed": 10,
+  "totalRedacted": 0,
+  "groqModel": "llama-3.1-8b-instant"
+}
