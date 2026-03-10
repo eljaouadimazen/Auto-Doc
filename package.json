@@ -4,9 +4,10 @@
   "description": "Generate a single file from a GitHub repository or local directory",
   "main": "src/app.js",
   "scripts": {
-    "start": "node src/app.js",
-    "dev": "nodemon src/app.js",
-    "test": "echo \"Error: no test specified\" && exit 1"
+     "start": "node src/app.js",
+     "dev": "nodemon src/app.js",
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "generate:ci": "node scripts/generate-docs-ci.js"
   },
   "dependencies": {
     "@google-cloud/aiplatform": "^6.4.0",
