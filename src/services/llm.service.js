@@ -12,48 +12,65 @@ class LLMService {
    * @param {Array}  messages - LLM message array
    * @param {string} apiKey   - optional per-request key (overrides .env)
    */
-  async generate(messages, apiKey = null) {
-    const key = apiKey || process.env.GROQ_API_KEY;
+  async generate(messages, apiKey = null, provider = 'groq') {
 
-    if (!key) {
-      throw new Error('No Groq API key provided. Add your key in the settings panel or set GROQ_API_KEY in .env');
-    }
-
+  // ── Local (Ollama) ─────────────────────────────────────────
+  if (provider === 'ollama') {
     try {
       const response = await axios.post(
-        'https://api.groq.com/openai/v1/chat/completions',
+        'http://localhost:11434/v1/chat/completions',
         {
-          model:       'llama-3.3-70b-versatile',
+          model:       process.env.OLLAMA_MODEL || 'phi3',
           messages,
           temperature: 0.2,
           max_tokens:  4096
         },
         {
-          headers: {
-            Authorization:  `Bearer ${key}`,
-            'Content-Type': 'application/json'
-          },
-          timeout: 30000
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 120000 // 2 min — local is slower
         }
       );
-
       return response.data.choices[0].message.content;
-
     } catch (error) {
-      if (error.response) {
-        const status = error.response.status;
-        const msg    = error.response.data?.error?.message || 'Unknown Groq error';
-        if (status === 401) throw new Error('Invalid API key — check your Groq key and try again');
-        if (status === 413) throw new Error('Prompt too large — try a smaller repository');
-        if (status === 429) throw new Error('Rate limit reached — wait a moment and try again');
-        throw new Error(`Groq API error (${status}): ${msg}`);
+      if (error.code === 'ECONNREFUSED') {
+        throw new Error('Ollama is not running — start it with: ollama serve');
       }
-      if (error.code === 'ECONNABORTED') {
-        throw new Error('Request timed out — Groq took too long to respond');
-      }
-      throw error;
+      throw new Error(`Ollama error: ${error.message}`);
     }
   }
+
+  // ── Cloud (Groq) ───────────────────────────────────────────
+  const key = apiKey || process.env.GROQ_API_KEY;
+  if (!key) throw new Error('No Groq API key provided');
+
+  try {
+    const response = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        model:       process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+        messages,
+        temperature: 0.2,
+        max_tokens:  4096
+      },
+      {
+        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
+        timeout: 30000
+      }
+    );
+    return response.data.choices[0].message.content;
+  } catch (error) {
+    if (error.response) {
+      const status = error.response.status;
+      const msg    = error.response.data?.error?.message || 'Unknown Groq error';
+      if (status === 401) throw new Error('Invalid API key — check your Groq key');
+      if (status === 413) throw new Error('Prompt too large — try a smaller repository');
+      if (status === 429) throw new Error('Rate limit reached — wait a moment');
+      throw new Error(`Groq API error (${status}): ${msg}`);
+    }
+    if (error.code === 'ECONNABORTED') throw new Error('Request timed out');
+    throw error;
+  }
+}
 
   /**
    * Validate a Groq API key using the /models endpoint

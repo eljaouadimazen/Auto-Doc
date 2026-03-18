@@ -7,6 +7,9 @@ const auditLog         = require('../services/audit-log.service');
 function getApiKey(req) {
   return req.headers['x-api-key'] || null;
 }
+function getProvider(req) {
+  return req.headers['x-provider'] || 'groq';
+}
 
 class GeneratorController {
 
@@ -75,10 +78,11 @@ class GeneratorController {
         return res.status(400).json({ error: 'messages array is required' });
       }
       const apiKey        = getApiKey(req);
-      const documentation = await llmService.generate(messages, apiKey);
+      const provider      = getProvider(req);
+      const documentation = await llmService.generate(messages, apiKey, provider);
       res.json({ step: 'generate', documentation });
     } catch (err) {
-      console.error('[generateDocs]', err.message);
+      console.error('[generateDocs]', err);
       res.status(500).json({ error: err.message });
     }
   }
@@ -90,10 +94,11 @@ class GeneratorController {
       if (!githubUrl) return res.status(400).json({ error: 'githubUrl is required' });
 
       const apiKey        = getApiKey(req);
+      const provider      = getProvider(req);
       const rawMarkdown   = await githubService.generateFromUrl(githubUrl);
       const safeMarkdown  = sanitizerService.clean(rawMarkdown);
       const llmInput      = await llmInputBuilder.build(safeMarkdown, { useAST });
-      const documentation = await llmService.generate(llmInput.messages, apiKey);
+      const documentation = await llmService.generate(llmInput.messages, apiKey, provider);
 
       res.json({ step: 'complete', mode: llmInput.mode, documentation });
     } catch (err) {
