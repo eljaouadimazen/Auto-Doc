@@ -4,6 +4,8 @@ import PipelineSteps from './components/PipelineSteps.jsx'
 import OutputPanel from './components/OutputPanel.jsx'
 import StatusBar from './components/StatusBar.jsx'
 import PipelineState from './components/PipelineState.jsx'
+import AuditPanel from './components/AuditPanel.jsx'
+import RulesPanel from './components/RulesPanel.jsx'
 
 export default function App() {
   const [apiKey,        setApiKey]        = useState('')
@@ -314,6 +316,11 @@ export default function App() {
 
       {/* Pipeline state indicator */}
       <PipelineState state={pipelineState} />
+       {/* Audit log */}
+      <AuditPanel apiKey={apiKey} />
+
+      {/* Custom rules */}
+      <RulesPanel apiKey={apiKey} />
 
     </div>
   )
