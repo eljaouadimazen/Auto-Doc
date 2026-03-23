@@ -25,38 +25,35 @@
       </span>
       <h1 class="text-2xl font-bold text-gray-900 mt-2">eljaouadimazen/Auto-Doc</h1>
     </div>
-    <div class="text-xs text-gray-400 font-mono">2026-03-18 13:25:09</div>
+    <div class="text-xs text-gray-400 font-mono">2026-03-23 13:49:18</div>
   </header>
 
   <main class="max-w-4xl mx-auto px-8 py-10">
     <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
-      <p>Auto-Doc Project Documentation
-============================
-<h2>Project Overview</h2></p><p>Auto-Doc is a secure AI-powered documentation generator for GitHub repositories. It fetches a public repository, analyzes its code structure using a custom regex-based AST parser, sanitizes any sensitive data, and generates professional documentation using the Groq LLM API.</p><p>The primary audience for this project appears to be developers and maintainers of GitHub repositories who require automated documentation generation while ensuring the security and confidentiality of their codebase.</p><p><h2>Architecture</h2></p><p>The Auto-Doc system employs a three-layer architecture:</p><p>1.  <strong>Local Processing Layer</strong>: Runs entirely on the server, responsible for fetching repository content from GitHub via the Octokit REST API, parsing code structure, detecting and redacting sensitive data, building structured LLM prompts, and logging sanitization events.
+      <p><strong>Auto-Doc Documentation</strong>
+==========================</p><p><h3>Project Overview</h3></p><p>Auto-Doc is a secure AI-powered documentation generator for GitHub repositories. It fetches a public repository, analyzes its code structure using a custom regex-based AST parser, sanitizes any sensitive data, and generates professional documentation using the Groq LLM API.</p><p>The primary audience for Auto-Doc appears to be developers and project maintainers who want to automate the documentation process for their GitHub repositories.</p><p><h3>Architecture</h3></p><p>Auto-Doc uses a three-layer architecture:</p><p>1.  <strong>Local Processing Layer</strong>: Runs entirely on the server, responsible for fetching repository content from GitHub, parsing code structure, detecting and redacting sensitive data, and building structured LLM prompts.
 2.  <strong>Cloud-based AI Generation Layer</strong>: Utilizes the Groq LLM API to generate professional documentation based on the structured prompts.
-3.  <strong>Automated Publishing Layer</strong>: Although not explicitly detailed in the provided code, this layer is implied to handle the publication of the generated documentation.</p><p><h2>Technologies & Dependencies</h2></p><p>The project relies on the following technologies and dependencies:</p><p>*   Node.js / Express for server-side processing
-*   <code>@octokit/rest</code> for interacting with the GitHub API
+3.  <strong>Automated Publishing Layer</strong>: Publishes the generated documentation.</p><p>The technologies used in Auto-Doc include:</p><p>*   Node.js with Express
+*   <code>@octokit/rest</code> for GitHub API interactions
 *   Custom <code>ASTParserService</code> for parsing code structure
-*   <code>dotenv</code> for environment variable management
-*   <code>ejs</code> for templating
-*   <code>simple-git</code> for Git operations
-*   <code>nodemon</code> for development purposes
-*   Groq LLM API for AI-powered documentation generation</p><p><h2>API Reference</h2></p><p>Although the API reference is not explicitly provided, the following routes can be inferred based on the project's functionality:</p><p>*   <strong>GET /docs</strong>: Retrieves the generated documentation for a repository.
-*   <strong>POST /generate</strong>: Triggers the documentation generation process for a specified repository.
-*   <strong>GET /health</strong>: Checks the health and status of the Auto-Doc service.</p><p><h2>Key Modules</h2></p><p>The following modules are crucial to the project's functionality:</p><p>*   <code>app.js</code>: The main application entry point, responsible for setting up the Express server and routing.
-*   <code>ASTParserService</code>: A custom service for parsing code structure using regex-based AST parsing.
-*   <code>SanitizerService</code>: Responsible for detecting and redacting sensitive data from the repository content.
-*   <code>LLMService</code>: Handles the interaction with the Groq LLM API for generating documentation.</p><p><h2>Environment Configuration</h2></p><p>The project requires the following environment variables to be configured:</p><p>*   <code>GITHUB_TOKEN</code>: A GitHub token for authenticating API requests.
-*   <code>GROQ_LLM_API_KEY</code>: An API key for the Groq LLM API.
-*   <code>REPOSITORY_OWNER</code> and <code>REPOSITORY_NAME</code>: The owner and name of the repository to generate documentation for.</p><p><h2>Security Notes</h2></p><p>The project prioritizes security through the following measures:</p><p>*   Sensitive data detection and redaction using built-in regex patterns (21 patterns) and custom rules.
-*   Logging of sanitization events for auditability.
-*   Use of environment variables for storing sensitive credentials.</p><p>However, the security of the project also depends on the security of the dependencies and the Groq LLM API.</p><p><h2>Setup & Usage</h2></p><p>To set up and use the Auto-Doc project, follow these steps:</p><p>1.  Clone the repository and install the dependencies using <code>npm install</code>.
-2.  Configure the required environment variables.
-3.  Start the server using <code>npm start</code>.
-4.  Trigger the documentation generation process by sending a POST request to the <code>/generate</code> endpoint.</p><p><h2>Uncertainties</h2></p><p>The following aspects of the project cannot be determined from the code alone:</p><p>*   The exact implementation details of the <code>ASTParserService</code> and <code>SanitizerService</code>.
-*   The structure and content of the generated documentation.
-*   The specifics of the Groq LLM API integration and its requirements.
-*   The project's handling of errors, edge cases, and unexpected input.</p>
+*   Groq LLM API for AI-powered documentation generation</p><p><h3>Technologies & Dependencies</h3></p><p>The following dependencies are inferred from the code:</p><p>*   <code>@octokit/rest</code>: GitHub API client
+*   <code>dotenv</code>: Environment variable management
+*   <code>ejs</code>: Templating engine
+*   <code>express</code>: Web framework
+*   <code>simple-git</code>: Git interactions
+*   <code>nodemon</code>: Development server</p><p><h3>API Reference</h3></p><p>Although the code does not provide an explicit API reference, the following routes can be inferred:</p><p>*   <code>/</code>: Web interface for manual pipeline execution
+*   <code>/docs</code>: Generated documentation</p><p>The purpose of these routes is to expose the pipeline as explicit steps, allowing users to inspect intermediate results before proceeding.</p><p><h3>Key Modules</h3></p><p>The following modules are identified:</p><p>*   <code>app.js</code>: Main application entry point
+*   <code>ASTParserService</code>: Custom service for parsing code structure
+*   <code>SanitizerService</code>: Service for detecting and redacting sensitive data
+*   <code>scripts/semantic-diff.js</code>: Script for performing AST-level comparisons between commits</p><p><h3>Environment Configuration</h3></p><p>The following environment variables are required:</p><p>*   <code>GITHUB_TOKEN</code>: GitHub API token
+*   <code>GROQ_LLM_API_KEY</code>: Groq LLM API key</p><p>These variables are used to authenticate interactions with the GitHub API and the Groq LLM API.</p><p><h3>Security Notes</h3></p><p>Auto-Doc has a security model that aims to prevent sensitive data from reaching the Groq LLM API. The <code>SanitizerService</code> runs two passes to detect and redact sensitive data:</p><p>1.  Once on the raw markdown blob returned by GitHub
+2.  Once per-file before building the LLM prompt</p><p>The service uses 21 built-in detection patterns to identify sensitive data, including API keys, secret keys, access tokens, and passwords.</p><p><h3>Setup & Usage</h3></p><p>To install and run Auto-Doc, follow these steps:</p><p>1.  Clone the repository: <code>git clone https://github.com/eljaouadimazen/Auto-Doc.git</code>
+2.  Install dependencies: <code>npm install</code>
+3.  Set environment variables: <code>GITHUB_TOKEN</code> and <code>GROQ_LLM_API_KEY</code>
+4.  Run the application: <code>node app.js</code></p><p><h3>Uncertainties</h3></p><p>The following aspects cannot be determined from the code alone:</p><p>*   The exact implementation of the <code>ASTParserService</code> and <code>SanitizerService</code>
+*   The structure and content of the generated documentation
+*   The specifics of the Groq LLM API integration
+*   The handling of errors and edge cases</p><p>These uncertainties highlight the need for additional documentation or code review to fully understand the implementation details of Auto-Doc.</p>
     </div>
   </main>
 
