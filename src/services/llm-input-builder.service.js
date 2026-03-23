@@ -6,6 +6,11 @@ class LLMInputBuilder {
   constructor() {
     this.MAX_FILE_CHARS  = 3000;
     this.MAX_TOTAL_CHARS = 20000;
+
+    // Smaller budget for local models (phi3 has 4k context)
+    this.MAX_TOTAL_CHARS_LOCAL = 4000;
+    this.MAX_FILE_CHARS_LOCAL  = 800;
+
     this.IGNORED_EXT = [
       '.png', '.jpg', '.jpeg', '.gif', '.svg', '.ico', '.webp', '.bmp',
       '.lock', '.map', '.min.js', '.min.css',
@@ -24,23 +29,25 @@ class LLMInputBuilder {
   /**
    * @param {string} markdownContent
    * @param {Object} options
-   * @param {boolean} options.useAST - true = AST mode (default), false = raw mode
+   * @param {boolean} options.useAST   - true = AST mode (default), false = raw mode
+   * @param {string}  options.provider - 'groq' | 'ollama' — affects token budget
    */
   async build(markdownContent, options = {}) {
-    const useAST = options.useAST !== false; // default ON
+    const useAST  = options.useAST !== false;
+    const isLocal = options.provider === 'ollama';
 
     const parsed   = this.parseMarkdown(markdownContent);
     const filtered = this.filterFiles(parsed);
     const secured  = this.sanitizeFiles(filtered);
 
     const prepared = useAST
-      ? this.applyASTParsing(secured)
-      : this.applyTokenBudget(secured);
+      ? this.applyASTParsing(secured, isLocal)
+      : this.applyTokenBudget(secured, isLocal);
 
     const enhanced = this.addMetadata(prepared, options);
 
     return useAST
-      ? this.formatForLLM_AST(enhanced)
+      ? this.formatForLLM_AST(enhanced, isLocal)
       : this.formatForLLM_raw(enhanced);
   }
 
@@ -78,7 +85,7 @@ class LLMInputBuilder {
       if (!f.content || f.size === 0) return false;
       if (this.IGNORED_EXT.includes(f.extension)) return false;
       if (this.SENSITIVE_FILENAMES.includes(f.filename.toLowerCase())) return false;
-      if (/node_modules|\/vendor\/|\/dist\/|\/build\/|\/\.git\//.test(f.path)) return false;
+      if (/node_modules|vendor\/|\/dist\/|\/build\/|\.git\//.test(f.path)) return false;
       return true;
     });
     return { ...parsed, files: filtered };
@@ -94,7 +101,10 @@ class LLMInputBuilder {
 
   // ─── RAW MODE ────────────────────────────────────────────────
 
-  applyTokenBudget(parsed) {
+  applyTokenBudget(parsed, isLocal = false) {
+    const MAX_FILE  = isLocal ? this.MAX_FILE_CHARS_LOCAL  : this.MAX_FILE_CHARS;
+    const MAX_TOTAL = isLocal ? this.MAX_TOTAL_CHARS_LOCAL : this.MAX_TOTAL_CHARS;
+
     let total = 0;
     const kept = [];
     const prioritized = [...parsed.files].sort((a, b) => {
@@ -104,10 +114,10 @@ class LLMInputBuilder {
     });
     for (const file of prioritized) {
       let content = file.content;
-      if (content.length > this.MAX_FILE_CHARS) {
-        content = content.slice(0, this.MAX_FILE_CHARS) + '\n/* FILE TRUNCATED */';
+      if (content.length > MAX_FILE) {
+        content = content.slice(0, MAX_FILE) + '\n/* FILE TRUNCATED */';
       }
-      if (total + content.length > this.MAX_TOTAL_CHARS) break;
+      if (total + content.length > MAX_TOTAL) break;
       total += content.length;
       kept.push({ ...file, content });
     }
@@ -139,7 +149,9 @@ ${filesText}`;
 
   // ─── AST MODE ────────────────────────────────────────────────
 
-  applyASTParsing(parsed) {
+  applyASTParsing(parsed, isLocal = false) {
+    const MAX_TOTAL = isLocal ? this.MAX_TOTAL_CHARS_LOCAL : this.MAX_TOTAL_CHARS;
+
     const parsedFiles = astParser.parseFiles(parsed.files);
 
     let totalChars = 0;
@@ -155,7 +167,7 @@ ${filesText}`;
 
     for (const file of prioritized) {
       const summary = astParser.toSummary(file);
-      if (totalChars + summary.length > this.MAX_TOTAL_CHARS) break;
+      if (totalChars + summary.length > MAX_TOTAL) break;
       totalChars += summary.length;
       kept.push({ ...file, summary });
     }
@@ -172,7 +184,7 @@ ${filesText}`;
     };
   }
 
-  formatForLLM_AST(content) {
+  formatForLLM_AST(content, isLocal = false) {
     const { files, repository, stats } = content;
 
     const allRoutes  = files.flatMap(f => f.ast?.expressRoutes || []);
@@ -192,7 +204,21 @@ ${filesText}`;
       allEnvVars.length ? `**Required env vars:** ${allEnvVars.join(', ')}` : '',
     ].filter(Boolean).join('\n');
 
-    const prompt = `You are a senior software architect and technical writer.
+    // Shorter prompt for local models to fit phi3 context window
+    const prompt = isLocal
+      ? `You are a technical writer. Analyze this code and write concise documentation.
+
+Repository: ${repository}
+Dependencies: ${allDeps.slice(0, 10).join(', ')}
+Routes: ${allRoutes.map(r => `${r.method} ${r.path}`).join(', ')}
+Env vars: ${allEnvVars.join(', ')}
+
+Files:
+${summaries}
+
+Write: Project Overview, Architecture, API Routes, Setup & Usage.`
+
+      : `You are a senior software architect and technical writer.
 
 Analyze the structured code intelligence below and produce professional documentation.
 

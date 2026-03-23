@@ -1,6 +1,6 @@
 const steps = [
-  { id: 'fetch',    label: 'Fetch & Sanitize', step: 'STEP 1', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', border: 'rgba(96,165,250,0.25)', btnBg: '#2563eb', btnHover: '#3b82f6', handler: 'onFetch',    btnLabel: 'Fetch Repo',    needsRaw: false, needsMsgs: false },
-  { id: 'build',    label: 'Build LLM Input',  step: 'STEP 2', color: '#fbbf24', bg: 'rgba(251,191,36,0.08)',  border: 'rgba(251,191,36,0.2)',  btnBg: '#d97706', btnHover: '#f59e0b', handler: 'onBuild',    btnLabel: 'Build Input',   needsRaw: true,  needsMsgs: false },
+  { id: 'fetch',    label: 'Fetch content', step: 'STEP 1', color: '#60a5fa', bg: 'rgba(96,165,250,0.12)', border: 'rgba(96,165,250,0.25)', btnBg: '#2563eb', btnHover: '#3b82f6', handler: 'onFetch',    btnLabel: 'Fetch Repo',    needsRaw: false, needsMsgs: false },
+  { id: 'build',    label: 'Build LLM Input & Sanitize',  step: 'STEP 2', color: '#fbbf24', bg: 'rgba(251,191,36,0.08)',  border: 'rgba(251,191,36,0.2)',  btnBg: '#d97706', btnHover: '#f59e0b', handler: 'onBuild',    btnLabel: 'Build Input',   needsRaw: true,  needsMsgs: false },
   { id: 'generate', label: 'Generate Docs',    step: 'STEP 3', color: '#22c55e', bg: 'rgba(34,197,94,0.08)',   border: 'rgba(34,197,94,0.2)',   btnBg: '#16a34a', btnHover: '#22c55e', handler: 'onGenerate', btnLabel: 'Generate Docs', needsRaw: true,  needsMsgs: true },
 ]
 

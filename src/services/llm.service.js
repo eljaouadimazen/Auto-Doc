@@ -20,14 +20,15 @@ class LLMService {
       const response = await axios.post(
         'http://localhost:11434/v1/chat/completions',
         {
-          model:       process.env.OLLAMA_MODEL || 'phi3',
+          model:       process.env.OLLAMA_MODEL || 'tinyllama',
           messages,
           temperature: 0.2,
-          max_tokens:  4096
+          max_tokens:  1024,
+          
         },
         {
           headers: { 'Content-Type': 'application/json' },
-          timeout: 120000 // 2 min — local is slower
+          timeout: 240000 // 4 min — local is slower
         }
       );
       return response.data.choices[0].message.content;
@@ -35,7 +36,11 @@ class LLMService {
       if (error.code === 'ECONNREFUSED') {
         throw new Error('Ollama is not running — start it with: ollama serve');
       }
-      throw new Error(`Ollama error: ${error.message}`);
+      console.error('[ollama raw error]', JSON.stringify(error.response?.data, null, 2));
+      const ollamaMsg = typeof error.response?.data?.error === 'string'
+      ? error.response.data.error
+      : JSON.stringify(error.response?.data) || error.message;
+      throw new Error(`Ollama error: ${ollamaMsg}`);
     }
   }
 

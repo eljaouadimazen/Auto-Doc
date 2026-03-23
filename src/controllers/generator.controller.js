@@ -11,7 +11,7 @@ function getProvider(req) {
   return req.headers['x-provider'] || 'groq';
 }
 
-class GeneratorController {
+class GeneratorController { 
 
   // STEP 1 — fetch + sanitize
   async fetchRepo(req, res) {
@@ -36,38 +36,32 @@ class GeneratorController {
 
   // STEP 2 — build LLM input + audit
   async buildInput(req, res) {
-    try {
-      const { rawMarkdown, useAST = true } = req.body;
-      if (!rawMarkdown) return res.status(400).json({ error: 'rawMarkdown is required' });
+  try {
+    const { rawMarkdown, useAST = true } = req.body;
+    if (!rawMarkdown) return res.status(400).json({ error: 'rawMarkdown is required' });
 
-      const parsed        = llmInputBuilder.parseMarkdown(rawMarkdown);
-      const fileAudits    = sanitizerService.auditFiles(parsed.files);
-      const totalRedacted = fileAudits.reduce((sum, f) => sum + f.detectedPatterns.length, 0);
+    const provider = getProvider(req); // ← add this
 
-      auditLog.log({
-        repository: parsed.repository,
-        ip:         req.ip,
-        mode:       useAST ? 'ast' : 'raw',
-        fileAudits,
-        totalRedacted
-      });
+    const parsed        = llmInputBuilder.parseMarkdown(rawMarkdown);
+    const fileAudits    = sanitizerService.auditFiles(parsed.files);
+    const totalRedacted = fileAudits.reduce((sum, f) => sum + f.detectedPatterns.length, 0);
 
-      const llmInput = await llmInputBuilder.build(rawMarkdown, { useAST });
+    auditLog.log({ repository: parsed.repository, ip: req.ip, mode: useAST ? 'ast' : 'raw', fileAudits, totalRedacted });
 
-      res.json({
-        step:         'build',
-        mode:         llmInput.mode,
-        messages:     llmInput.messages,
-        auditSummary: {
-          filesScanned:  parsed.files.length,
-          totalRedacted,
-          filesAffected: fileAudits.filter(f => f.detectedPatterns.length > 0).length
-        }
-      });
-    } catch (err) {
-      console.error('[buildInput]', err.message);
-      res.status(500).json({ error: err.message });
-    }
+    const llmInput = await llmInputBuilder.build(rawMarkdown, { useAST, provider }); // ← add provider
+
+    res.json({
+      step: 'build', mode: llmInput.mode, messages: llmInput.messages,
+      auditSummary: {
+        filesScanned:  parsed.files.length,
+        totalRedacted,
+        filesAffected: fileAudits.filter(f => f.detectedPatterns.length > 0).length
+      }
+    });
+  } catch (err) {
+    console.error('[buildInput]', err.message);
+    res.status(500).json({ error: err.message });
+  }
   }
 
   // STEP 3 — call LLM
