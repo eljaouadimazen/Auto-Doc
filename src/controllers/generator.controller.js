@@ -1,17 +1,41 @@
-const githubService    = require('../services/github.service');
-const llmInputBuilder  = require('../services/llm-input-builder.service');
-const llmService       = require('../services/llm.service');
-const sanitizerService = require('../services/sanitizer.service');
-const auditLog         = require('../services/audit-log.service');
+const githubService        = require('../services/github.service');
+const llmInputBuilder      = require('../services/llm-input-builder.service');
+const llmService           = require('../services/llm.service');
+const sanitizerService     = require('../services/sanitizer.service');
+const auditLog             = require('../services/audit-log.service');
+const OrchestratorAgent    = require('../agents/orchestrator.agent');
+const protocol             = require('../agents/protocol');
 
 function getApiKey(req) {
   return req.headers['x-api-key'] || null;
 }
+
 function getProvider(req) {
   return req.headers['x-provider'] || 'groq';
 }
 
-class GeneratorController { 
+function getMode(req) {
+  return req.headers['x-mode'] || 'classic'; // 'classic' | 'agentic'
+}
+
+/**
+ * Parse markdown string from github.service into array of {path, content}
+ * The Orchestrator needs structured files, not a markdown blob
+ */
+function parseMarkdownToFiles(markdown) {
+  const fileRegex = /## File: (.+?)\n```(?:\w+)?\n?([\s\S]*?)```/g;
+  const files     = [];
+  let match;
+  while ((match = fileRegex.exec(markdown)) !== null) {
+    files.push({
+      path:    match[1].trim(),
+      content: match[2]
+    });
+  }
+  return files;
+}
+
+class GeneratorController {
 
   // STEP 1 — fetch + sanitize
   async fetchRepo(req, res) {
@@ -36,52 +60,110 @@ class GeneratorController {
 
   // STEP 2 — build LLM input + audit
   async buildInput(req, res) {
-  try {
-    const { rawMarkdown, useAST = true } = req.body;
-    if (!rawMarkdown) return res.status(400).json({ error: 'rawMarkdown is required' });
+    try {
+      const { rawMarkdown, useAST = true } = req.body;
+      if (!rawMarkdown) return res.status(400).json({ error: 'rawMarkdown is required' });
 
-    const provider = getProvider(req); // ← add this
+      const provider = getProvider(req);
 
-    const parsed        = llmInputBuilder.parseMarkdown(rawMarkdown);
-    const fileAudits    = sanitizerService.auditFiles(parsed.files);
-    const totalRedacted = fileAudits.reduce((sum, f) => sum + f.detectedPatterns.length, 0);
+      const parsed        = llmInputBuilder.parseMarkdown(rawMarkdown);
+      const fileAudits    = sanitizerService.auditFiles(parsed.files);
+      const totalRedacted = fileAudits.reduce((sum, f) => sum + f.detectedPatterns.length, 0);
 
-    auditLog.log({ repository: parsed.repository, ip: req.ip, mode: useAST ? 'ast' : 'raw', fileAudits, totalRedacted });
+      auditLog.log({
+        repository: parsed.repository,
+        ip:         req.ip,
+        mode:       useAST ? 'ast' : 'raw',
+        fileAudits,
+        totalRedacted
+      });
 
-    const llmInput = await llmInputBuilder.build(rawMarkdown, { useAST, provider }); // ← add provider
+      const llmInput = await llmInputBuilder.build(rawMarkdown, { useAST, provider });
 
-    res.json({
-      step: 'build', mode: llmInput.mode, messages: llmInput.messages,
-      auditSummary: {
-        filesScanned:  parsed.files.length,
-        totalRedacted,
-        filesAffected: fileAudits.filter(f => f.detectedPatterns.length > 0).length
-      }
-    });
-  } catch (err) {
-    console.error('[buildInput]', err.message);
-    res.status(500).json({ error: err.message });
+      res.json({
+        step:         'build',
+        mode:         llmInput.mode,
+        messages:     llmInput.messages,
+        auditSummary: {
+          filesScanned:  parsed.files.length,
+          totalRedacted,
+          filesAffected: fileAudits.filter(f => f.detectedPatterns.length > 0).length
+        }
+      });
+    } catch (err) {
+      console.error('[buildInput]', err.message);
+      res.status(500).json({ error: err.message });
+    }
   }
-  }
 
-  // STEP 3 — call LLM
+  // STEP 3 — generate docs (classic OR agentic)
   async generateDocs(req, res) {
     try {
+      const mode = getMode(req);
+
+      // ── AGENTIC MODE ──────────────────────────────────────────
+      if (mode === 'agentic') {
+        const { rawMarkdown } = req.body;
+        if (!rawMarkdown) {
+          return res.status(400).json({ error: 'rawMarkdown is required for agentic mode' });
+        }
+
+        const files      = parseMarkdownToFiles(rawMarkdown);
+        const repository = rawMarkdown.match(/^# (.+)$/m)?.[1]?.trim() || 'unknown-repo';
+
+        if (files.length === 0) {
+          return res.status(400).json({ error: 'No files found in markdown — run Fetch first' });
+        }
+
+        console.info(`[generateDocs] Agentic mode — ${files.length} files, repo: ${repository}`);
+
+        const orchestrator = new OrchestratorAgent({
+          batchSize:    2,
+          batchDelayMs: 15000,
+          maxFiles:     10,
+          onProgress:   (p) => console.info('[Orchestrator progress]', p)
+        });
+
+        const runId = protocol.generateRunId();
+        const input = protocol.buildInput(
+          'Generate documentation for this repository',
+          { repository, runId, previous: {} },
+          { files, provider: getProvider(req) }
+        );
+
+        const output = await orchestrator.run(input);
+
+        if (output.status === 'failed') {
+          return res.status(500).json({ error: output.error || 'Agentic pipeline failed' });
+        }
+
+        return res.json({
+          step:          'generate',
+          documentation: output.result.documentation,
+          mode:          'agentic',
+          stats:         output.result.stats
+        });
+      }
+
+      // ── CLASSIC MODE ──────────────────────────────────────────
       const { messages } = req.body;
       if (!messages || !Array.isArray(messages)) {
-        return res.status(400).json({ error: 'messages array is required' });
+        return res.status(400).json({ error: 'messages array is required for classic mode' });
       }
+
       const apiKey        = getApiKey(req);
       const provider      = getProvider(req);
       const documentation = await llmService.generate(messages, apiKey, provider);
-      res.json({ step: 'generate', documentation });
+
+      res.json({ step: 'generate', documentation, mode: 'classic' });
+
     } catch (err) {
       console.error('[generateDocs]', err);
       res.status(500).json({ error: err.message });
     }
   }
 
-  // FULL PIPELINE
+  // FULL CLASSIC PIPELINE
   async generate(req, res) {
     try {
       const { githubUrl, useAST = true } = req.body;
@@ -91,7 +173,7 @@ class GeneratorController {
       const provider      = getProvider(req);
       const rawMarkdown   = await githubService.generateFromUrl(githubUrl);
       const safeMarkdown  = sanitizerService.clean(rawMarkdown);
-      const llmInput      = await llmInputBuilder.build(safeMarkdown, { useAST });
+      const llmInput      = await llmInputBuilder.build(safeMarkdown, { useAST, provider });
       const documentation = await llmService.generate(llmInput.messages, apiKey, provider);
 
       res.json({ step: 'complete', mode: llmInput.mode, documentation });
@@ -101,27 +183,20 @@ class GeneratorController {
     }
   }
 
-  // ── KEY VALIDATION ───────────────────────────────────────────────
-  // Real Groq validation via /models endpoint — zero tokens consumed
+  // ── KEY VALIDATION ────────────────────────────────────────────
   async validateKey(req, res) {
     try {
       const apiKey = getApiKey(req);
-
-      if (!apiKey) {
-        return res.json({ valid: false, reason: 'No key provided' });
-      }
-
-      // Call llmService.validateKey — hits Groq /models, not /chat/completions
+      if (!apiKey) return res.json({ valid: false, reason: 'No key provided' });
       const result = await llmService.validateKey(apiKey);
       return res.json(result);
-
     } catch (err) {
       console.error('[validateKey]', err.message);
       return res.status(500).json({ valid: false, reason: err.message });
     }
   }
 
-  // ── AUDIT ────────────────────────────────────────────────────────
+  // ── AUDIT ─────────────────────────────────────────────────────
   getAuditLogs(req, res) {
     const { limit = 50, onlyIssues = 'false' } = req.query;
     const logs = auditLog.getLogs({
@@ -131,7 +206,7 @@ class GeneratorController {
     res.json({ logs, stats: auditLog.getStats() });
   }
 
-  // ── CUSTOM RULES ─────────────────────────────────────────────────
+  // ── CUSTOM RULES ──────────────────────────────────────────────
   listRules(req, res) {
     res.json({ rules: sanitizerService.listCustomRules() });
   }

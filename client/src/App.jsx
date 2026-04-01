@@ -12,6 +12,7 @@ export default function App() {
   const [githubUrl,     setGithubUrl]     = useState('')
   const [useAST,        setUseAST]        = useState(true)
   const [provider,      setProvider]      = useState('groq')
+  const [pipelineMode,  setPipelineMode]  = useState('classic') // 'classic' | 'agentic'
   const [raw,           setRaw]           = useState(null)
   const [messages,      setMessages]      = useState(null)
   const [output,        setOutput]        = useState('Ready. Paste a GitHub URL and click Fetch Repo.')
@@ -27,8 +28,9 @@ export default function App() {
     const h = { 'Content-Type': 'application/json' }
     if (apiKey) h['x-api-key'] = apiKey
     h['x-provider'] = provider
+    h['x-mode']     = pipelineMode
     return h
-  }, [apiKey, provider])
+  }, [apiKey, provider, pipelineMode])
 
   // ── Step 1 ────────────────────────────────────────────────────
   const fetchRepo = useCallback(async () => {
@@ -59,6 +61,15 @@ export default function App() {
   const buildInput = useCallback(async () => {
     if (!raw) { setError('Run Fetch Repo first'); return }
 
+    // In agentic mode, skip build step — orchestrator handles everything
+    if (pipelineMode === 'agentic') {
+      setMessages(['agentic']) // placeholder so Generate button enables
+      setMode('agentic')
+      setOutput('✓ READY FOR AGENTIC GENERATION\n\nClick Generate Docs — the Orchestrator will run all agents automatically.')
+      setPipelineState(s => ({ ...s, build: true }))
+      return
+    }
+
     setError(null); setLoading(true)
     setLoadingMsg(`Building ${useAST ? 'AST' : 'raw'} LLM input...`)
     setOutput('Building...'); setMessages(null)
@@ -82,7 +93,7 @@ export default function App() {
     } finally {
       setLoading(false)
     }
-  }, [raw, useAST, authHeaders])
+  }, [raw, useAST, authHeaders, pipelineMode])
 
   // ── Step 3 ────────────────────────────────────────────────────
   const generateDocs = useCallback(async () => {
@@ -90,26 +101,40 @@ export default function App() {
 
     setError(null); setLoading(true)
     setLoadingMsg(
-      provider === 'ollama'
-        ? 'Running local phi3 — this may take 30–60 seconds...'
-        : 'Calling Groq LLM — this may take 10–20 seconds...'
+      pipelineMode === 'agentic'
+        ? 'Running agentic pipeline — Security → Code Intelligence → Architecture → Writer...'
+        : provider === 'ollama'
+          ? 'Running local phi3 — this may take 30–60 seconds...'
+          : 'Calling Groq LLM — this may take 10–20 seconds...'
     )
     setOutput('Generating documentation...')
 
     try {
-      const res  = await fetch('/generate-docs', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ messages }) })
+      const res = await fetch('/generate-docs', {
+        method:  'POST',
+        headers: authHeaders(),
+        body:    JSON.stringify({
+          messages,
+          rawMarkdown: raw  // needed for agentic mode
+        })
+      })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Generation failed')
       setOutput(data.documentation)
       setPipelineState(s => ({ ...s, generate: true }))
       setTab('rendered')
+
+      // Show agentic stats if available
+      if (data.stats) {
+        console.info('[Agentic stats]', data.stats)
+      }
     } catch (err) {
       setError(err.message)
       setOutput('Generation failed.')
     } finally {
       setLoading(false)
     }
-  }, [messages, authHeaders, provider])
+  }, [messages, raw, authHeaders, provider, pipelineMode])
 
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '2.5rem 1.5rem', minHeight: '100vh' }}>
@@ -126,7 +151,7 @@ export default function App() {
             display: 'inline-block', animation: 'pulse-dot 2s ease-in-out infinite'
           }} />
           <span style={{ color: 'var(--accent)', fontSize: '.72rem', fontFamily: 'var(--font-mono)', letterSpacing: 2 }}>
-            AUTO-DOC v0.4
+            AUTO-DOC v0.5
           </span>
         </div>
         <h1 style={{
@@ -150,7 +175,89 @@ export default function App() {
         boxShadow: '0 0 60px rgba(34,197,94,0.04), 0 20px 40px rgba(0,0,0,0.4)'
       }} className="fade-in">
 
-        {/* ── STEP 0: Provider Selection ── */}
+        {/* ── Pipeline Mode Toggle ── */}
+        <div style={{ marginBottom: '1.5rem' }}>
+          <label style={{
+            display: 'block', fontSize: '.68rem', color: 'var(--text-muted)',
+            letterSpacing: 2, marginBottom: 10, textTransform: 'uppercase'
+          }}>
+            Pipeline Mode
+          </label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            {[
+              {
+                id:    'classic',
+                icon:  '⚡',
+                label: 'Classic',
+                desc:  'Fast · AST parser · single LLM call',
+                color: '#fbbf24',
+                bg:    'rgba(251,191,36,0.08)',
+                border:'rgba(251,191,36,0.25)',
+              },
+              {
+                id:    'agentic',
+                icon:  '🤖',
+                label: 'Agentic',
+                desc:  'Smart · multi-agent · deeper analysis · slower',
+                color: '#a78bfa',
+                bg:    'rgba(167,139,250,0.08)',
+                border:'rgba(167,139,250,0.25)',
+              },
+            ].map(m => (
+              <button
+                key={m.id}
+                onClick={() => !loading && setPipelineMode(m.id)}
+                disabled={loading}
+                style={{
+                  padding: '14px 16px', borderRadius: 'var(--radius)', border: '1px solid',
+                  borderColor:  pipelineMode === m.id ? m.border : 'var(--border)',
+                  background:   pipelineMode === m.id ? m.bg : 'var(--bg-surface)',
+                  cursor: loading ? 'not-allowed' : 'pointer',
+                  textAlign: 'left', transition: 'all 0.2s',
+                  boxShadow: pipelineMode === m.id ? `0 0 16px ${m.bg}` : 'none'
+                }}
+              >
+                <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                  <span style={{ fontSize: '1rem' }}>{m.icon}</span>
+                  <span style={{
+                    fontSize: '.82rem', fontWeight: 600,
+                    color: pipelineMode === m.id ? m.color : 'var(--text-secondary)',
+                    fontFamily: 'var(--font-display)', transition: 'color 0.2s'
+                  }}>
+                    {m.label}
+                  </span>
+                  {pipelineMode === m.id && (
+                    <span style={{
+                      marginLeft: 'auto', fontSize: '.65rem', padding: '1px 8px',
+                      borderRadius: 999, background: m.bg, color: m.color,
+                      border: `1px solid ${m.border}`, fontFamily: 'var(--font-mono)'
+                    }}>
+                      selected
+                    </span>
+                  )}
+                </div>
+                <div style={{ fontSize: '.72rem', color: 'var(--text-muted)', paddingLeft: 26 }}>
+                  {m.desc}
+                </div>
+              </button>
+            ))}
+          </div>
+
+          {/* Agentic mode info banner */}
+          {pipelineMode === 'agentic' && (
+            <div style={{
+              marginTop: 10, padding: '10px 14px',
+              background: 'rgba(167,139,250,0.06)', border: '1px solid rgba(167,139,250,0.2)',
+              borderRadius: 8, fontSize: '.72rem', color: 'var(--text-muted)', lineHeight: 1.6
+            }}>
+              🤖 <strong style={{ color: '#a78bfa' }}>Agentic mode</strong> runs 4 specialized agents:
+              Security Agent → Code Intelligence Agent → Architecture Agent → Writer Agent.
+              Expect 2–5 minutes for repos with 10+ files. Build Input step is skipped — the Orchestrator handles everything.
+            </div>
+          )}
+        </div>
+
+        {/* ── LLM Provider ── */}
         <div style={{ marginBottom: '1.5rem' }}>
           <label style={{
             display: 'block', fontSize: '.68rem', color: 'var(--text-muted)',
@@ -160,61 +267,29 @@ export default function App() {
           </label>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
             {[
-              {
-                id:    'groq',
-                icon:  '☁',
-                label: 'Cloud — Groq',
-                desc:  'Fast generation via Groq API',
-                color: '#60a5fa',
-                bg:    'rgba(96,165,250,0.08)',
-                border:'rgba(96,165,250,0.25)',
-              },
-              {
-                id:    'ollama',
-                icon:  '💻',
-                label: 'Local — Ollama',
-                desc:  '100% private · runs on your machine',
-                color: '#22c55e',
-                bg:    'rgba(34,197,94,0.08)',
-                border:'rgba(34,197,94,0.25)',
-              },
+              { id: 'groq',   icon: '☁',  label: 'Cloud — Groq',   desc: 'Fast generation via Groq API',          color: '#60a5fa', bg: 'rgba(96,165,250,0.08)',  border: 'rgba(96,165,250,0.25)' },
+              { id: 'ollama', icon: '💻', label: 'Local — Ollama',  desc: '100% private · runs on your machine',   color: '#22c55e', bg: 'rgba(34,197,94,0.08)',   border: 'rgba(34,197,94,0.25)' },
             ].map(p => (
-              <button
-                key={p.id}
-                onClick={() => !loading && setProvider(p.id)}
-                disabled={loading}
-                style={{
-                  padding: '14px 16px', borderRadius: 'var(--radius)', border: '1px solid',
-                  borderColor:  provider === p.id ? p.border : 'var(--border)',
-                  background:   provider === p.id ? p.bg : 'var(--bg-surface)',
-                  cursor: loading ? 'not-allowed' : 'pointer',
-                  textAlign: 'left', transition: 'all 0.2s',
-                  boxShadow: provider === p.id ? `0 0 16px ${p.bg}` : 'none'
-                }}
-              >
+              <button key={p.id} onClick={() => !loading && setProvider(p.id)} disabled={loading} style={{
+                padding: '14px 16px', borderRadius: 'var(--radius)', border: '1px solid',
+                borderColor: provider === p.id ? p.border : 'var(--border)',
+                background:  provider === p.id ? p.bg : 'var(--bg-surface)',
+                cursor: loading ? 'not-allowed' : 'pointer',
+                textAlign: 'left', transition: 'all 0.2s',
+                boxShadow: provider === p.id ? `0 0 16px ${p.bg}` : 'none'
+              }}>
                 <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
                   <span style={{ fontSize: '1rem' }}>{p.icon}</span>
-                  <span style={{
-                    fontSize: '.82rem', fontWeight: 600,
-                    color: provider === p.id ? p.color : 'var(--text-secondary)',
-                    fontFamily: 'var(--font-display)',
-                    transition: 'color 0.2s'
-                  }}>
+                  <span style={{ fontSize: '.82rem', fontWeight: 600, color: provider === p.id ? p.color : 'var(--text-secondary)', fontFamily: 'var(--font-display)', transition: 'color 0.2s' }}>
                     {p.label}
                   </span>
                   {provider === p.id && (
-                    <span style={{
-                      marginLeft: 'auto', fontSize: '.65rem', padding: '1px 8px',
-                      borderRadius: 999, background: p.bg, color: p.color,
-                      border: `1px solid ${p.border}`, fontFamily: 'var(--font-mono)'
-                    }}>
+                    <span style={{ marginLeft: 'auto', fontSize: '.65rem', padding: '1px 8px', borderRadius: 999, background: p.bg, color: p.color, border: `1px solid ${p.border}`, fontFamily: 'var(--font-mono)' }}>
                       selected
                     </span>
                   )}
                 </div>
-                <div style={{ fontSize: '.72rem', color: 'var(--text-muted)', paddingLeft: 26 }}>
-                  {p.desc}
-                </div>
+                <div style={{ fontSize: '.72rem', color: 'var(--text-muted)', paddingLeft: 26 }}>{p.desc}</div>
               </button>
             ))}
           </div>
@@ -222,30 +297,17 @@ export default function App() {
 
         {/* ── API Key — only shown for cloud mode ── */}
         {provider === 'groq' && (
-          <div style={{
-            marginBottom: '1.5rem',
-            animation: 'fade-in 0.3s ease forwards'
-          }}>
+          <div style={{ marginBottom: '1.5rem', animation: 'fade-in 0.3s ease forwards' }}>
             <KeyPanel apiKey={apiKey} setApiKey={setApiKey} />
           </div>
         )}
 
-        {/* ── Ollama info — only shown for local mode ── */}
+        {/* ── Ollama info ── */}
         {provider === 'ollama' && (
-          <div style={{
-            marginBottom: '1.5rem', padding: '12px 16px',
-            background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.15)',
-            borderRadius: 'var(--radius)', animation: 'fade-in 0.3s ease forwards'
-          }}>
+          <div style={{ marginBottom: '1.5rem', padding: '12px 16px', background: 'rgba(34,197,94,0.05)', border: '1px solid rgba(34,197,94,0.15)', borderRadius: 'var(--radius)', animation: 'fade-in 0.3s ease forwards' }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
-              <span style={{ fontSize: '.78rem', color: 'var(--accent)', fontWeight: 500 }}>
-                💻 Running phi3 locally
-              </span>
-              <span style={{
-                fontSize: '.65rem', padding: '1px 8px', borderRadius: 999,
-                background: 'rgba(34,197,94,0.1)', color: 'var(--accent)',
-                border: '1px solid rgba(34,197,94,0.2)', fontFamily: 'var(--font-mono)'
-              }}>
+              <span style={{ fontSize: '.78rem', color: 'var(--accent)', fontWeight: 500 }}>💻 Running phi3 locally</span>
+              <span style={{ fontSize: '.65rem', padding: '1px 8px', borderRadius: 999, background: 'rgba(34,197,94,0.1)', color: 'var(--accent)', border: '1px solid rgba(34,197,94,0.2)', fontFamily: 'var(--font-mono)' }}>
                 no API key needed
               </span>
             </div>
@@ -258,37 +320,29 @@ export default function App() {
 
         {/* ── URL Input ── */}
         <div style={{ marginBottom: '1.5rem' }}>
-          <label style={{
-            display: 'block', fontSize: '.68rem', color: 'var(--text-muted)',
-            letterSpacing: 2, marginBottom: 8, textTransform: 'uppercase'
-          }}>
+          <label style={{ display: 'block', fontSize: '.68rem', color: 'var(--text-muted)', letterSpacing: 2, marginBottom: 8, textTransform: 'uppercase' }}>
             GitHub Repository URL
           </label>
           <input
-            type="url"
-            value={githubUrl}
+            type="url" value={githubUrl}
             onChange={e => setGithubUrl(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && !loading && fetchRepo()}
             placeholder="https://github.com/username/repository"
             disabled={loading}
-            style={{
-              width: '100%', padding: '12px 16px',
-              background: 'var(--bg-surface)', border: '1px solid var(--border)',
-              borderRadius: 'var(--radius)', color: 'var(--text-primary)',
-              fontFamily: 'var(--font-mono)', fontSize: '.85rem', outline: 'none',
-              transition: 'border-color 0.2s',
-            }}
+            style={{ width: '100%', padding: '12px 16px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)', color: 'var(--text-primary)', fontFamily: 'var(--font-mono)', fontSize: '.85rem', outline: 'none', transition: 'border-color 0.2s' }}
             onFocus={e => e.target.style.borderColor = 'var(--accent)'}
             onBlur={e => e.target.style.borderColor = 'var(--border)'}
           />
         </div>
 
-        {/* ── AST Toggle ── */}
-        <ASTToggle
-          useAST={useAST}
-          setUseAST={val => { setUseAST(val); if (raw) setMessages(null); }}
-          disabled={loading}
-        />
+        {/* ── AST Toggle — hidden in agentic mode ── */}
+        {pipelineMode === 'classic' && (
+          <ASTToggle
+            useAST={useAST}
+            setUseAST={val => { setUseAST(val); if (raw) setMessages(null); }}
+            disabled={loading}
+          />
+        )}
 
         {/* ── Pipeline Steps ── */}
         <PipelineSteps
@@ -301,25 +355,15 @@ export default function App() {
         />
 
         {/* ── Status + Error ── */}
-        <StatusBar
-          loading={loading}
-          message={loadingMsg}
-          error={error}
-          mode={mode}
-          auditSummary={auditSummary}
-        />
+        <StatusBar loading={loading} message={loadingMsg} error={error} mode={mode} auditSummary={auditSummary} />
 
         {/* ── Output ── */}
         <OutputPanel output={output} tab={tab} setTab={setTab} />
 
       </div>
 
-      {/* Pipeline state indicator */}
       <PipelineState state={pipelineState} />
-       {/* Audit log */}
       <AuditPanel apiKey={apiKey} />
-
-      {/* Custom rules */}
       <RulesPanel apiKey={apiKey} />
 
     </div>
@@ -328,39 +372,17 @@ export default function App() {
 
 function ASTToggle({ useAST, setUseAST, disabled }) {
   return (
-    <div style={{
-      display: 'flex', alignItems: 'center', gap: 14,
-      padding: '12px 16px', marginBottom: '1.5rem',
-      background: 'var(--bg-surface)', border: '1px solid var(--border)',
-      borderRadius: 'var(--radius)'
-    }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', marginBottom: '1.5rem', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 'var(--radius)' }}>
       <button
         onClick={() => !disabled && setUseAST(!useAST)}
-        style={{
-          width: 44, height: 24, borderRadius: 12, border: 'none',
-          cursor: disabled ? 'not-allowed' : 'pointer',
-          background: useAST ? 'var(--accent)' : 'var(--bg-elevated)',
-          position: 'relative', transition: 'background 0.25s', flexShrink: 0,
-          boxShadow: useAST ? '0 0 12px rgba(34,197,94,0.4)' : 'none'
-        }}
+        style={{ width: 44, height: 24, borderRadius: 12, border: 'none', cursor: disabled ? 'not-allowed' : 'pointer', background: useAST ? 'var(--accent)' : 'var(--bg-elevated)', position: 'relative', transition: 'background 0.25s', flexShrink: 0, boxShadow: useAST ? '0 0 12px rgba(34,197,94,0.4)' : 'none' }}
       >
-        <span style={{
-          position: 'absolute', top: 2, left: 2, width: 20, height: 20,
-          background: '#fff', borderRadius: '50%', transition: 'transform 0.25s',
-          transform: useAST ? 'translateX(20px)' : 'translateX(0)',
-          boxShadow: '0 1px 4px rgba(0,0,0,0.3)'
-        }} />
+        <span style={{ position: 'absolute', top: 2, left: 2, width: 20, height: 20, background: '#fff', borderRadius: '50%', transition: 'transform 0.25s', transform: useAST ? 'translateX(20px)' : 'translateX(0)', boxShadow: '0 1px 4px rgba(0,0,0,0.3)' }} />
       </button>
       <div>
         <div style={{ fontSize: '.85rem', fontWeight: 500, display: 'flex', alignItems: 'center', gap: 8 }}>
           AST Mode
-          <span style={{
-            fontSize: '.68rem', padding: '2px 8px', borderRadius: 999,
-            background: useAST ? 'rgba(34,197,94,0.12)' : 'var(--bg-elevated)',
-            color: useAST ? 'var(--accent)' : 'var(--text-muted)',
-            border: `1px solid ${useAST ? 'rgba(34,197,94,0.3)' : 'var(--border)'}`,
-            fontFamily: 'var(--font-mono)'
-          }}>
+          <span style={{ fontSize: '.68rem', padding: '2px 8px', borderRadius: 999, background: useAST ? 'rgba(34,197,94,0.12)' : 'var(--bg-elevated)', color: useAST ? 'var(--accent)' : 'var(--text-muted)', border: `1px solid ${useAST ? 'rgba(34,197,94,0.3)' : 'var(--border)'}`, fontFamily: 'var(--font-mono)' }}>
             {useAST ? 'ON' : 'OFF'}
           </span>
         </div>
