@@ -30,6 +30,31 @@ class SanitizerService {
       { name: 'private_key',    regex: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g },
       { name: 'certificate',    regex: /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g },
       { name: 'dotenv_value',   regex: /^([A-Z][A-Z0-9_]{2,})\s*=\s*["']?([^\s"'\n]{8,})["']?$/gm },
+      // PII Patterns
+      { name: 'email',         regex: /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g },
+      { name: 'phone_us',      regex: /(\+1[\s\-.]?)?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}/g },
+      { name: 'phone_intl',    regex: /\+(?:[0-9][\s\-.]?){6,14}[0-9]/g },
+      { name: 'ssn',           regex: /\b(?!000|666|9\d{2})\d{3}[- ]?(?!00)\d{2}[- ]?(?!0000)\d{4}\b/g },
+      { name: 'credit_card',   regex: /\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b/g },
+      { name: 'ip_address',    regex: /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g },
+      { name: 'ipv6',          regex: /([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}/g },
+      { name: 'mac_address',   regex: /([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}/g },
+      { name: 'iban',          regex: /\b[A-Z]{2}[0-9]{2}[A-Z0-9]{4}[0-9]{7}([A-Z0-9]?){0,16}\b/g },
+      { name: 'date_of_birth', regex: /\b(?:dob|date.of.birth|birthdate)\s*[:=]\s*\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/gi },
+      { name: 'passport',      regex: /\b[A-Z]{1,2}[0-9]{6,9}\b/g },
+      { name: 'national_id',   regex: /\b(?:national.id|nid|cin)\s*[:=]\s*[A-Z0-9\-]{6,20}/gi },
+      // Additional secrets
+      { name: 'stripe_key',      regex: /(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{24,}/g },
+      { name: 'twilio_sid',      regex: /AC[a-z0-9]{32}/g },
+      { name: 'twilio_token',    regex: /SK[a-z0-9]{32}/g },
+      { name: 'firebase_key',    regex: /AAAA[A-Za-z0-9_\-]{7}:[A-Za-z0-9_\-]{140}/g },
+      { name: 'jwt_token',       regex: /eyJ[A-Za-z0-9\-_]+\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_.+/]*/g },
+      { name: 'basic_auth_url',  regex: /https?:\/\/[^:]+:[^@]+@[^\s"']+/gi },
+      { name: 'ssh_private_key', regex: /-----BEGIN OPENSSH PRIVATE KEY-----[\s\S]*?-----END OPENSSH PRIVATE KEY-----/g },
+      { name: 'heroku_api_key',  regex: /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g }, // UUID-shaped keys
+      { name: 'npm_token',       regex: /npm_[A-Za-z0-9]{36}/g },
+      { name: 'cloudinary_url',  regex: /cloudinary:\/\/[0-9]+:[A-Za-z0-9_\-]+@[a-z0-9]+/g },
+      { name: 'sendgrid_key',    regex: /SG\.[A-Za-z0-9\-_]{22}\.[A-Za-z0-9\-_]{43}/g },
     ];
 
     this.customRules    = [];
@@ -71,7 +96,77 @@ class SanitizerService {
   }
 
   // ─── Core ─────────────────────────────────────────────────────
+  // ─── Entropy Detection ─────────────────────────────────────────
 
+shannonEntropy(str) {
+  const map = {};
+  for (const char of str) {
+    map[char] = (map[char] || 0) + 1;
+  }
+
+  return Object.values(map).reduce((acc, freq) => {
+    const p = freq / str.length;
+    return acc - p * Math.log2(p);
+  }, 0);
+}
+
+ detectHighEntropyStrings(text) {
+  // Skip known safe high-entropy patterns (base64 images, hashes in comments, etc.)
+  const SAFE_CONTEXTS = [
+    /data:image\/[a-z]+;base64,/i,     // inline images
+    /\b[0-9a-f]{40}\b/i,               // git SHA hashes (safe, public)
+    /\b[0-9a-f]{64}\b/i,               // SHA256 hashes
+  ];
+
+  const lines = text.split('\n');
+  const findings = [];
+
+  lines.forEach((line, lineNum) => {
+    const isSafeContext = SAFE_CONTEXTS.some(p => p.test(line));
+    if (isSafeContext) return;
+
+    // Only flag if it looks like an assignment (key = value)
+    const assignmentMatch = line.match(/[:=]\s*["']?([A-Za-z0-9+/=_\-]{20,})["']?/);
+    if (!assignmentMatch) return;
+
+    const candidate = assignmentMatch[1];
+    const entropy = this.shannonEntropy(candidate);
+
+    if (entropy > 4.2) {
+      findings.push({
+        value:   candidate,
+        entropy: entropy.toFixed(2),
+        line:    lineNum + 1,
+      });
+    }
+  });
+
+  return findings;
+}
+report(text, filePath = 'unknown') {
+  const piiTypes    = ['email', 'phone_us', 'phone_intl', 'ssn', 'credit_card', 'ip_address', 'iban'];
+  const secretTypes = ['api_key', 'jwt_token', 'aws_key', 'github_pat', 'password']; // etc.
+
+  const detected   = this.audit(text);
+  const highEntropy = this.detectHighEntropyStrings(text);
+
+  return {
+    filePath,
+    timestamp:    new Date().toISOString(),
+    hasSensitiveData: detected.length > 0 || highEntropy.length > 0,
+    summary: {
+      secrets:         detected.filter(d => secretTypes.includes(d)),
+      pii:             detected.filter(d => piiTypes.includes(d)),
+      highEntropyHits: highEntropy.length,
+    },
+    details: {
+      matchedPatterns: detected,
+      highEntropyStrings: highEntropy,
+    },
+    sanitizedContent: this.clean(text),
+  };
+}
+  
   clean(text) {
     if (!text || typeof text !== 'string') return text;
     let sanitized = text;
@@ -95,7 +190,7 @@ class SanitizerService {
     return files.map(file => ({ ...file, content: this.clean(file.content) }));
   }
 
-  audit(text) {
+  audit(text) { 
     if (!text || typeof text !== 'string') return [];
     const detected = [];
     const all = [...this.builtinPatterns, ...this._customPatterns];
