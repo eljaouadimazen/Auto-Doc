@@ -1,285 +1,260 @@
-import { useState, useCallback, useEffect } from 'react'
+import { useState, useCallback } from 'react'
 import KeyPanel from './components/KeyPanel.jsx'
+import PipelineSteps from './components/PipelineSteps.jsx'
 import OutputPanel from './components/OutputPanel.jsx'
+import StatusBar from './components/StatusBar.jsx'
+import PipelineState from './components/PipelineState.jsx'
 import AuditPanel from './components/AuditPanel.jsx'
 import RulesPanel from './components/RulesPanel.jsx'
 
-/* ─────────────────────────────────────────────────────────────
-   GLOBAL STYLES (Merged High-Contrast Theme)
-───────────────────────────────────────────────────────────── */
-const GLOBAL_CSS = `
-  @import url('https://fonts.googleapis.com/css2?family=Syne+Mono&family=Syne:wght@400;600;800&family=DM+Mono:ital,wght@0,300;0,400;0,500;1,300&display=swap');
-
-  .autodoc-root {
-    --ink:        #0b0e14;
-    --ink2:       #141820;
-    --ink3:       #1e2430;
-    --border:     rgba(255,255,255,0.07);
-    --border2:    rgba(255,255,255,0.13);
-    --amber:      #f5a623;
-    --amber-dim:  rgba(245,166,35,0.12);
-    --amber-glow: rgba(245,166,35,0.25);
-    --text:       #e8e4db;
-    --muted:      #6b7180;
-    --muted2:     #4a5060;
-    --green:      #3ddc84;
-    --green-dim:  rgba(61,220,132,0.1);
-    --red:        #ff5f6d;
-    --blue:       #5ba4f5;
-    --font-head:  'Syne', sans-serif;
-    --font-mono:  'DM Mono', monospace;
-    --font-disp:  'Syne Mono', monospace;
-
-    font-family: var(--font-mono);
-    background: var(--ink);
-    color: var(--text);
-    min-height: 100vh;
-  }
-
-  .autodoc-root * { box-sizing: border-box; margin: 0; padding: 0; }
-  .fade-up { animation: fadeUp 0.45s cubic-bezier(.22,1,.36,1) both }
-  @keyframes fadeUp { from{opacity:0;transform:translateY(12px)} to{opacity:1;transform:none} }
-  @keyframes spin { to{transform:rotate(360deg)} }
-
-  .ad-input {
-    width:100%; padding:11px 14px;
-    background:var(--ink3); border:1px solid var(--border2);
-    border-radius:6px; color:var(--text);
-    font-family:var(--font-mono); font-size:.82rem;
-    outline:none; transition:all .2s;
-  }
-  .ad-input:focus { border-color:var(--amber); box-shadow:0 0 0 3px var(--amber-dim); }
-
-  .step-btn {
-    display:flex; align-items:center; gap:10px;
-    padding:12px 16px; border-radius:8px;
-    border:1px solid var(--border); background:var(--ink2);
-    cursor:pointer; transition:all .18s; width:100%;
-    font-family:var(--font-mono); font-size:.8rem; color:var(--muted);
-  }
-  .step-btn.s-ready { color:var(--text); border-color:var(--border2); background:var(--ink3) }
-  .step-btn.s-done  { color:var(--green); border-color:rgba(61,220,132,.25); background:var(--green-dim) }
-
-  .spinner {
-    width:14px; height:14px; border-radius:50%;
-    border:2px solid var(--border2); border-top-color:var(--amber);
-    animation:spin .7s linear infinite;
-  }
-`
-
-function injectStyles() {
-  if (document.getElementById('autodoc-styles')) return
-  const el = document.createElement('style')
-  el.id = 'autodoc-styles'
-  el.textContent = GLOBAL_CSS
-  document.head.appendChild(el)
-}
-
-/* ─────────────────────────────────────────────────────────────
-   MAIN APP
-───────────────────────────────────────────────────────────── */
 export default function App() {
-  injectStyles()
-
-  // --- Persistent State ---
   const [apiKey,        setApiKey]        = useState('')
   const [githubUrl,     setGithubUrl]     = useState('')
-  const [provider,      setProvider]      = useState('groq')
   const [useAST,        setUseAST]        = useState(true)
+  const [provider,      setProvider]      = useState('groq')
   const [pipelineMode,  setPipelineMode]  = useState('classic') // 'classic' | 'agentic'
-
-  // --- Processing State ---
   const [raw,           setRaw]           = useState(null)
   const [messages,      setMessages]      = useState(null)
-  const [output,        setOutput]        = useState('// system ready — enter repository url')
+  const [output,        setOutput]        = useState('Ready. Paste a GitHub URL and click Fetch Repo.')
   const [loading,       setLoading]       = useState(false)
-  const [loadingStep,   setLoadingStep]   = useState(null)
-  const [loadingMsg,    setLoadingMsg]    = useState('')
+  const [loadingMsg,    setLoadingMsg]    = useState('Working...')
   const [error,         setError]         = useState(null)
-
-  // --- Metadata (Branch 1 & 2 Merge) ---
   const [tab,           setTab]           = useState('raw')
-  const [projectNature, setProjectNature] = useState(null)
+  const [mode,          setMode]          = useState(null)
   const [auditSummary,  setAuditSummary]  = useState(null)
-  const [pipeline,      setPipeline]      = useState({ fetch: false, build: false, generate: false })
+  const [pipelineState, setPipelineState] = useState({ fetch: false, build: false, generate: false })
+  
+  // New state for toggling the extra panels
+  const [showSettings,  setShowSettings]  = useState(false)
 
   const authHeaders = useCallback(() => {
     const h = { 'Content-Type': 'application/json' }
     if (apiKey) h['x-api-key'] = apiKey
     h['x-provider'] = provider
-    h['x-pipeline-mode'] = pipelineMode
+    h['x-mode']     = pipelineMode
     return h
   }, [apiKey, provider, pipelineMode])
 
-  // STEP 1: Fetch
+  // ── Step 1 ────────────────────────────────────────────────────
   const fetchRepo = useCallback(async () => {
-    if (!githubUrl) { setError('Target URL required'); return }
-    setError(null); setLoading(true); setLoadingStep('fetch'); setLoadingMsg('scanning repository...')
-    
+    if (!githubUrl) { setError('Enter a GitHub URL'); return }
+    if (!githubUrl.includes('github.com')) { setError('Must be a github.com URL'); return }
+
+    setError(null); setLoading(true); setLoadingMsg('Fetching repository...')
+    setOutput('Fetching...'); setRaw(null); setMessages(null)
+    setMode(null); setAuditSummary(null)
+    setPipelineState({ fetch: false, build: false, generate: false })
+
     try {
-      const res = await fetch('/fetch', { 
-        method: 'POST', 
-        headers: authHeaders(), 
-        body: JSON.stringify({ githubUrl }) 
-      })
+      const res  = await fetch('/fetch', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ githubUrl }) })
       const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      
+      if (!res.ok) throw new Error(data.error || 'Fetch failed')
       setRaw(data.rawMarkdown)
-      setOutput(`// fetch successful\n// objects found: ${data.fileCount || 'N/A'}\n\n${data.preview}`)
-      setPipeline(s => ({ ...s, fetch: true }))
+      setOutput(`✓ FETCH COMPLETE\n\nSize: ${data.size} chars\n\n--- PREVIEW ---\n\n${data.preview}`)
+      setPipelineState(s => ({ ...s, fetch: true }))
     } catch (err) {
       setError(err.message)
-    } finally {
-      setLoading(false); setLoadingStep(null)
-    }
-  }, [githubUrl, authHeaders])
-
-  // STEP 2: Build (The Security Chokepoint)
-  const buildInput = useCallback(async () => {
-    if (!raw) return
-    setError(null); setLoading(true); setLoadingStep('build'); setLoadingMsg('enforcing pii sanitization...')
-    
-    try {
-      const res = await fetch('/build', { 
-        method: 'POST', 
-        headers: authHeaders(), 
-        body: JSON.stringify({ rawMarkdown: raw, useAST }) 
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      
-      setMessages(data.messages)
-      setAuditSummary(data.auditSummary)
-      setProjectNature(data.nature || 'General')
-      
-      const a = data.auditSummary
-      setOutput(`// build complete\n// security: ${a.totalRedacted} redacted\n// nature: ${data.nature || 'analyzing...'}`)
-      setPipeline(s => ({ ...s, build: true }))
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false); setLoadingStep(null)
-    }
-  }, [raw, useAST, authHeaders])
-
-  // STEP 3: Generate
-  const generateDocs = useCallback(async () => {
-    if (!messages) return
-    setLoading(true); setLoadingMsg('generating professional documentation...')
-    
-    try {
-      const res = await fetch('/generate-docs', { 
-        method: 'POST', 
-        headers: authHeaders(), 
-        body: JSON.stringify({ messages }) 
-      })
-      const data = await res.json()
-      if (!res.ok) throw new Error(data.error)
-      
-      setOutput(data.documentation)
-      setPipeline(s => ({ ...s, generate: true }))
-      setTab('rendered')
-    } catch (err) {
-      setError(err.message)
+      setOutput('Fetch failed.')
     } finally {
       setLoading(false)
     }
-  }, [messages, authHeaders])
+  }, [githubUrl, authHeaders])
+
+  // ── Step 2 ────────────────────────────────────────────────────
+  const buildInput = useCallback(async () => {
+    if (!raw) { setError('Run Fetch Repo first'); return }
+
+    if (pipelineMode === 'agentic') {
+      setMessages(['agentic']) 
+      setMode('agentic')
+      setOutput('✓ READY FOR AGENTIC GENERATION\n\nClick Generate Docs — the Orchestrator will run all agents automatically.')
+      setPipelineState(s => ({ ...s, build: true }))
+      return
+    }
+
+    setError(null); setLoading(true)
+    setLoadingMsg(`Building ${useAST ? 'AST' : 'raw'} LLM input...`)
+    setOutput('Building...'); setMessages(null)
+
+    try {
+      const res  = await fetch('/build', { method: 'POST', headers: authHeaders(), body: JSON.stringify({ rawMarkdown: raw, useAST }) })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Build failed')
+      setMessages(data.messages)
+      setMode(data.mode)
+      setAuditSummary(data.auditSummary)
+      const a = data.auditSummary
+      const auditLine = a.totalRedacted > 0
+        ? `⚠  ${a.totalRedacted} secret(s) redacted in ${a.filesAffected} file(s)`
+        : '✓ No secrets detected'
+      setOutput(`✓ BUILD COMPLETE [mode: ${data.mode}]\n\nSecurity audit: ${a.filesScanned} files scanned\n${auditLine}`)
+      setPipelineState(s => ({ ...s, build: true }))
+    } catch (err) {
+      setError(err.message)
+      setOutput('Build failed.')
+    } finally {
+      setLoading(false)
+    }
+  }, [raw, useAST, authHeaders, pipelineMode])
+
+  // ── Step 3 ────────────────────────────────────────────────────
+  const generateDocs = useCallback(async () => {
+    if (!messages) { setError('Run Build Input first'); return }
+
+    setError(null); setLoading(true)
+    setLoadingMsg(
+      pipelineMode === 'agentic'
+        ? 'Running agentic pipeline — Security → Code Intelligence → Architecture → Writer...'
+        : provider === 'ollama'
+          ? 'Running local phi3 — this may take 30–60 seconds...'
+          : 'Calling Groq LLM — this may take 10–20 seconds...'
+    )
+    setOutput('Generating documentation...')
+
+    try {
+      const res = await fetch('/generate-docs', {
+        method:  'POST',
+        headers: authHeaders(),
+        body:    JSON.stringify({
+          messages,
+          rawMarkdown: raw 
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Generation failed')
+      setOutput(data.documentation)
+      setPipelineState(s => ({ ...s, generate: true }))
+      setTab('rendered')
+    } catch (err) {
+      setError(err.message)
+      setOutput('Generation failed.')
+    } finally {
+      setLoading(false)
+    }
+  }, [messages, raw, authHeaders, provider, pipelineMode])
 
   return (
-    <div className="autodoc-root">
-      <div style={{ maxWidth: 900, margin: '0 auto', padding: '40px 20px' }} className="fade-up">
-        
-        <header style={{ marginBottom: 40 }}>
-          <h1 style={{ fontFamily: 'var(--font-head)', fontSize: '1.8rem', fontWeight: 800 }}>
-            AUTO<span style={{ color: 'var(--amber)' }}>DOC</span>.SYS
-          </h1>
-          <p style={{ color: 'var(--muted)', fontSize: '.75rem', marginTop: 4 }}>
-            AGENTIC DOCUMENTATION ENGINE // PII-SAFE
-          </p>
-        </header>
+    <div style={{ maxWidth: 900, margin: '0 auto', padding: '2.5rem 1.5rem', minHeight: '100vh' }}>
 
-        <div style={{ display: 'grid', gridTemplateColumns: '1fr 300px', gap: 30 }}>
-          
-          {/* Main Controls */}
-          <main>
-            <section style={{ marginBottom: 24 }}>
-              <input 
-                className="ad-input" 
-                placeholder="https://github.com/user/repo"
-                value={githubUrl}
-                onChange={e => setGithubUrl(e.target.value)}
-              />
-            </section>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
-              <StepButton 
-                index="1" label="Fetch Source" 
-                status={pipeline.fetch ? 'done' : loadingStep === 'fetch' ? 'loading' : 'ready'} 
-                onClick={fetchRepo} 
-              />
-              <StepButton 
-                index="2" label="Build Context & Scour PII" 
-                status={pipeline.build ? 'done' : loadingStep === 'build' ? 'loading' : pipeline.fetch ? 'ready' : 'idle'} 
-                onClick={buildInput} 
-              />
-              <StepButton 
-                index="3" label="Generate Architecture" 
-                status={pipeline.generate ? 'done' : loading ? 'loading' : pipeline.build ? 'ready' : 'idle'} 
-                onClick={generateDocs} 
-              />
-            </div>
-
-            <OutputPanel output={output} tab={tab} setTab={setTab} />
-          </main>
-
-          {/* Sidebar / Panels */}
-          <aside>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: 20 }}>
-              <KeyPanel apiKey={apiKey} setApiKey={setApiKey} provider={provider} setProvider={setProvider} />
-              
-              <div style={{ padding: 15, background: 'var(--ink2)', borderRadius: 8, border: '1px solid var(--border)' }}>
-                <div style={{ fontSize: '.65rem', color: 'var(--muted)', marginBottom: 10, letterSpacing: 1 }}>ENGINE CONFIG</div>
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <span style={{ fontSize: '.8rem' }}>Agentic Mode</span>
-                  <button 
-                    onClick={() => setPipelineMode(prev => prev === 'classic' ? 'agentic' : 'classic')}
-                    style={{ 
-                      padding: '4px 8px', fontSize: '.6rem', borderRadius: 4, cursor: 'pointer',
-                      background: pipelineMode === 'agentic' ? 'var(--amber)' : 'var(--ink3)',
-                      color: pipelineMode === 'agentic' ? '#000' : 'var(--muted)'
-                    }}
-                  >
-                    {pipelineMode.toUpperCase()}
-                  </button>
-                </div>
-              </div>
-
-              {auditSummary && <AuditPanel summary={auditSummary} />}
-              <RulesPanel />
-            </div>
-          </aside>
+      {/* Header */}
+      <header style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
+        <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', padding: '6px 16px', borderRadius: 999, marginBottom: 20 }}>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block' }} />
+          <span style={{ color: 'var(--accent)', fontSize: '.72rem', fontFamily: 'var(--font-mono)', letterSpacing: 2 }}>AUTO-DOC v0.5</span>
         </div>
+        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(1.6rem, 4vw, 2.4rem)', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)', marginBottom: 10 }}>
+          Repository Documentation Generator
+        </h1>
+      </header>
+
+      {/* Main Container */}
+      <div style={{ position: 'relative', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: '2rem', boxShadow: '0 20px 40px rgba(0,0,0,0.4)' }}>
+        
+        {/* Toggle Settings Button */}
+        <button 
+          onClick={() => setShowSettings(!showSettings)}
+          style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: showSettings ? 'var(--accent)' : 'var(--bg-elevated)', color: showSettings ? '#000' : 'var(--text-muted)', border: '1px solid var(--border)', padding: '6px 12px', borderRadius: 8, fontSize: '.7rem', cursor: 'pointer', transition: 'all 0.2s', zIndex: 10 }}>
+          {showSettings ? '✕ Close Settings' : '⚙ Advanced Settings'}
+        </button>
+
+        {/* ── Mode Selection ── */}
+        <div style={{ marginBottom: '1.5rem' }}>
+          <label style={{ display: 'block', fontSize: '.68rem', color: 'var(--text-muted)', letterSpacing: 2, marginBottom: 10, textTransform: 'uppercase' }}>Pipeline Mode</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <ModeButton active={pipelineMode === 'classic'} onClick={() => setPipelineMode('classic')} icon="⚡" label="Classic" desc="AST parser · single LLM call" color="#fbbf24" />
+            <ModeButton active={pipelineMode === 'agentic'} onClick={() => setPipelineMode('agentic')} icon="🤖" label="Agentic" desc="Multi-agent · deeper analysis" color="#a78bfa" />
+          </div>
+        </div>
+
+        {/* ── LLM Provider ── */}
+        <div style={{ marginBottom: '1.5rem' }}>
+          <label style={{ display: 'block', fontSize: '.68rem', color: 'var(--text-muted)', letterSpacing: 2, marginBottom: 10, textTransform: 'uppercase' }}>LLM Provider</label>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
+            <ProviderButton active={provider === 'groq'} onClick={() => setProvider('groq')} icon="☁" label="Cloud — Groq" color="#60a5fa" />
+            <ProviderButton active={provider === 'ollama'} onClick={() => setProvider('ollama')} icon="💻" label="Local — Ollama" color="#22c55e" />
+          </div>
+        </div>
+
+        {/* ── Inputs ── */}
+        {provider === 'groq' && <KeyPanel apiKey={apiKey} setApiKey={setApiKey} />}
+        
+        <div style={{ marginBottom: '1.5rem' }}>
+          <label style={{ display: 'block', fontSize: '.68rem', color: 'var(--text-muted)', letterSpacing: 2, marginBottom: 8, textTransform: 'uppercase' }}>GitHub Repository URL</label>
+          <input 
+            className="ad-input" 
+            type="url" value={githubUrl} 
+            onChange={e => setGithubUrl(e.target.value)} 
+            placeholder="https://github.com/username/repository" 
+            style={{ width: '100%', padding: '12px 16px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }} 
+          />
+        </div>
+
+        {pipelineMode === 'classic' && <ASTToggle useAST={useAST} setUseAST={setUseAST} disabled={loading} />}
+
+        {/* ── Core Pipeline ── */}
+        <PipelineSteps loading={loading} raw={raw} messages={messages} onFetch={fetchRepo} onBuild={buildInput} onGenerate={generateDocs} />
+        <StatusBar loading={loading} message={loadingMsg} error={error} mode={mode} auditSummary={auditSummary} />
+        <OutputPanel output={output} tab={tab} setTab={setTab} />
+
+        {/* ── Hidden Advanced Panels (Audit & Rules) ── */}
+        {showSettings && (
+          <div style={{ marginTop: '2rem', paddingTop: '2rem', borderTop: '1px dashed var(--border)', animation: 'fade-in 0.3s ease' }}>
+            <h3 style={{ fontSize: '.85rem', color: 'var(--accent)', marginBottom: '1.5rem', fontFamily: 'var(--font-display)' }}>Advanced Configuration & Security</h3>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '1.5rem' }}>
+              <AuditPanel apiKey={apiKey} />
+              <RulesPanel apiKey={apiKey} />
+            </div>
+          </div>
+        )}
       </div>
+
+      <PipelineState state={pipelineState} />
     </div>
   )
 }
 
-function StepButton({ index, label, status, onClick }) {
-  const isDone = status === 'done'
-  const isLoading = status === 'loading'
-  const isReady = status === 'ready'
-  
+// --- Helper Components for Cleanliness ---
+
+function ModeButton({ active, onClick, icon, label, desc, color }) {
   return (
-    <button 
-      className={`step-btn s-${status}`} 
-      onClick={onClick} 
-      disabled={status === 'idle' || isLoading}
-    >
-      {isLoading ? <div className="spinner" /> : <span style={{ color: isDone ? 'var(--green)' : isReady ? 'var(--amber)' : 'inherit' }}>{isDone ? '●' : '○'}</span>}
-      <span style={{ flex: 1, textAlign: 'left' }}>{label}</span>
-      <span style={{ fontSize: '.6rem', opacity: 0.5 }}>{index}</span>
+    <button onClick={onClick} style={{
+      padding: '14px 16px', borderRadius: 8, border: '1px solid',
+      borderColor: active ? color : 'var(--border)',
+      background: active ? `${color}15` : 'var(--bg-surface)',
+      cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <span>{icon}</span>
+        <span style={{ fontSize: '.82rem', fontWeight: 600, color: active ? color : 'var(--text-secondary)' }}>{label}</span>
+      </div>
+      <div style={{ fontSize: '.72rem', color: 'var(--text-muted)' }}>{desc}</div>
     </button>
+  )
+}
+
+function ProviderButton({ active, onClick, icon, label, color }) {
+  return (
+    <button onClick={onClick} style={{
+      padding: '12px 16px', borderRadius: 8, border: '1px solid',
+      borderColor: active ? color : 'var(--border)',
+      background: active ? `${color}15` : 'var(--bg-surface)',
+      cursor: 'pointer', transition: 'all 0.2s'
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span>{icon}</span>
+        <span style={{ fontSize: '.82rem', fontWeight: 600, color: active ? color : 'var(--text-secondary)' }}>{label}</span>
+      </div>
+    </button>
+  )
+}
+
+function ASTToggle({ useAST, setUseAST, disabled }) {
+  return (
+    <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', marginBottom: '1.5rem', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 8 }}>
+      <button onClick={() => !disabled && setUseAST(!useAST)} style={{ width: 40, height: 20, borderRadius: 10, border: 'none', cursor: 'pointer', background: useAST ? 'var(--accent)' : 'var(--bg-elevated)', position: 'relative' }}>
+        <span style={{ position: 'absolute', top: 2, left: 2, width: 16, height: 16, background: '#fff', borderRadius: '50%', transform: useAST ? 'translateX(20px)' : 'translateX(0)', transition: 'transform 0.2s' }} />
+      </button>
+      <span style={{ fontSize: '.8rem' }}>AST Mode {useAST ? '(On)' : '(Off)'}</span>
+    </div>
   )
 }
