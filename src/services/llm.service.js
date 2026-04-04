@@ -49,21 +49,27 @@ class LLMService {
   if (!key) throw new Error('No Groq API key provided');
 
   try {
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model:       process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
-        messages,
-        temperature: 0.2,
-        max_tokens:  4096
+  const response = await axios.post(
+    'https://api.groq.com/openai/v1/chat/completions',
+    {
+      model:       process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+      messages,
+      temperature: 0.2,
+      max_tokens:  4096
+    },
+    {
+      headers: { 
+        Authorization: `Bearer ${key}`, 
+        'Content-Type': 'application/json',
+        'Accept-Encoding': 'gzip, deflate, br', // Explicitly allow these
       },
-      {
-        headers: { Authorization: `Bearer ${key}`, 'Content-Type': 'application/json' },
-        timeout: 30000
-      }
-    );
-    return response.data.choices[0].message.content;
-  } catch (error) {
+      decompress: true, // Ensure Axios handles the decompression
+      timeout: 30000
+    }
+  );
+  return response.data.choices[0].message.content;
+}
+  catch (error) {
     if (error.response) {
       const status = error.response.status;
       const msg    = error.response.data?.error?.message || 'Unknown Groq error';
