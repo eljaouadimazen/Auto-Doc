@@ -1,0 +1,31 @@
+/* Add these rules to whatever CSS file defines .markdown */
+
+/* mermaid container — shown as raw text until mermaid.run() fires */
+.markdown .mermaid {
+  background:    #1a1a2e;
+  border:        1px solid var(--border2, #333);
+  border-radius: 8px;
+  padding:       1.5rem;
+  margin:        1rem 0;
+  overflow-x:    auto;
+  text-align:    center;
+  /* while unprocessed, show raw code faintly */
+  font-family:   var(--font-mono);
+  font-size:     11px;
+  color:         #555;
+  white-space:   pre;
+}
+
+/* after mermaid processes it, the SVG is injected — center and size it */
+.markdown .mermaid svg {
+  max-width:  100%;
+  height:     auto;
+  display:    block;
+  margin:     0 auto;
+}
+
+/* mermaid uses these internal classes — make sure they're not clipped */
+.markdown .mermaid .label,
+.markdown .mermaid .edgeLabel {
+  font-family: inherit;
+}

@@ -5,6 +5,9 @@ const sanitizerService     = require('../services/sanitizer.service');
 const auditLog             = require('../services/audit-log.service');
 const OrchestratorAgent    = require('../agents/orchestrator.agent');
 const protocol             = require('../agents/protocol');
+// ── NEW: nature-aware classifier + templates ──────────────────────────────────
+const { detectProjectNature } = require('../services/Nature-Classifier.service');
+const { buildNaturePrompt }   = require('../services/Project-Templates.service');
 
 function getApiKey(req) {
   return req.headers['x-api-key'] || null;
@@ -37,15 +40,22 @@ function parseMarkdownToFiles(markdown) {
 
 class GeneratorController {
 
-  // STEP 1 — fetch + sanitize
+  // STEP 1 — fetch + sanitize (unchanged)
   async fetchRepo(req, res) {
     try {
       const { githubUrl } = req.body;
       if (!githubUrl || !githubUrl.includes('github.com')) {
         return res.status(400).json({ error: 'Invalid GitHub URL' });
       }
-      const rawMarkdown  = await githubService.generateFromUrl(githubUrl);
-      const safeMarkdown = sanitizerService.clean(rawMarkdown);
+
+      const Repository = require('../models/Repository');
+      const repo = new Repository(githubUrl);
+      const files = await repo.fetchFiles();
+
+      files.forEach(f => f.sanitize());
+
+      const safeMarkdown = files.map(f => `## File: ${f.path}\n\`\`\`\n${f.rawContent}\n\`\`\``).join('\n\n');
+
       res.json({
         step:        'fetch',
         rawMarkdown: safeMarkdown,
@@ -59,6 +69,7 @@ class GeneratorController {
   }
 
   // STEP 2 — build LLM input + audit
+  // ── MODIFIED: runs nature detection and injects template into llmInputBuilder ─
   async buildInput(req, res) {
     try {
       const { rawMarkdown, useAST = true } = req.body;
@@ -78,12 +89,23 @@ class GeneratorController {
         totalRedacted
       });
 
-      const llmInput = await llmInputBuilder.build(rawMarkdown, { useAST, provider });
+      // ── NEW: detect nature from the parsed file list ──────────────────────────
+      const filePaths                      = parsed.files.map(f => f.path);
+      const { nature, confidence, scores } = detectProjectNature(filePaths);
+      const naturePrompt                   = buildNaturePrompt(nature);
+
+      console.info(`[buildInput] nature=${nature} | confidence=${confidence}% | scores=`, scores);
+
+      // Pass naturePrompt into the builder so it can inject it into the system message.
+      // llmInputBuilder.build() already accepts an options object — we add naturePrompt there.
+      const llmInput = await llmInputBuilder.build(rawMarkdown, { useAST, provider, naturePrompt });
 
       res.json({
-        step:         'build',
-        mode:         llmInput.mode,
-        messages:     llmInput.messages,
+        step:     'build',
+        mode:     llmInput.mode,
+        messages: llmInput.messages,
+        // ── NEW: surface detection result to the frontend ─────────────────────
+        natureMeta: { nature, confidence, scores },
         auditSummary: {
           filesScanned:  parsed.files.length,
           totalRedacted,
@@ -96,7 +118,7 @@ class GeneratorController {
     }
   }
 
-  // STEP 3 — generate docs (classic OR agentic)
+  // STEP 3 — generate docs (classic OR agentic, unchanged)
   async generateDocs(req, res) {
     try {
       const mode = getMode(req);
@@ -164,26 +186,43 @@ class GeneratorController {
   }
 
   // FULL CLASSIC PIPELINE
+  // ── MODIFIED: nature detection added before llmInputBuilder.build() ───────────
   async generate(req, res) {
     try {
       const { githubUrl, useAST = true } = req.body;
       if (!githubUrl) return res.status(400).json({ error: 'githubUrl is required' });
 
-      const apiKey        = getApiKey(req);
-      const provider      = getProvider(req);
-      const rawMarkdown   = await githubService.generateFromUrl(githubUrl);
-      const safeMarkdown  = sanitizerService.clean(rawMarkdown);
-      const llmInput      = await llmInputBuilder.build(safeMarkdown, { useAST, provider });
-      const documentation = await llmService.generate(llmInput.messages, apiKey, provider);
+      const apiKey       = getApiKey(req);
+      const provider     = getProvider(req);
 
-      res.json({ step: 'complete', mode: llmInput.mode, documentation });
+      const Repository = require('../models/Repository');
+      const Documentation = require('../models/Documentation');
+      
+      const repo = new Repository(githubUrl);
+      const files = await repo.fetchFiles();
+      files.forEach(f => f.sanitize());
+      const safeMarkdown = files.map(f => `## File: ${f.path}\n\`\`\`\n${f.rawContent}\n\`\`\``).join('\n\n');
+
+      // ── NEW ───────────────────────────────────────────────────────────────────
+      const filePaths                      = files.map(f => f.path);
+      const { nature, confidence }         = detectProjectNature(filePaths);
+      const naturePrompt                   = buildNaturePrompt(nature);
+      console.info(`[generate] nature=${nature} | confidence=${confidence}%`);
+      // ─────────────────────────────────────────────────────────────────────────
+
+      const llmInput      = await llmInputBuilder.build(safeMarkdown, { useAST, provider, naturePrompt });
+      const docContent    = await llmService.generate(llmInput.messages, apiKey, provider);
+      
+      const documentation = new Documentation(docContent, { mode: llmInput.mode, nature, confidence });
+
+      res.json({ step: 'complete', mode: llmInput.mode, documentation: documentation.content, natureMeta: { nature, confidence } });
     } catch (err) {
       console.error('[generate]', err.message);
       res.status(500).json({ error: err.message });
     }
   }
 
-  // ── KEY VALIDATION ────────────────────────────────────────────
+  // ── KEY VALIDATION (unchanged) ────────────────────────────────────────────────
   async validateKey(req, res) {
     try {
       const apiKey = getApiKey(req);
@@ -196,7 +235,7 @@ class GeneratorController {
     }
   }
 
-  // ── AUDIT ─────────────────────────────────────────────────────
+  // ── AUDIT (unchanged) ─────────────────────────────────────────────────────────
   getAuditLogs(req, res) {
     const { limit = 50, onlyIssues = 'false' } = req.query;
     const logs = auditLog.getLogs({
@@ -206,7 +245,7 @@ class GeneratorController {
     res.json({ logs, stats: auditLog.getStats() });
   }
 
-  // ── CUSTOM RULES ──────────────────────────────────────────────
+  // ── CUSTOM RULES (unchanged) ──────────────────────────────────────────────────
   listRules(req, res) {
     res.json({ rules: sanitizerService.listCustomRules() });
   }
@@ -245,6 +284,22 @@ class GeneratorController {
       });
     } catch (err) {
       res.status(400).json({ error: `Invalid regex: ${err.message}` });
+    }
+  }
+
+  // ── CLASSIFIER — standalone endpoint for testing/debugging ───────────────────
+  // Replaces the old inline detectProjectNature arrow function.
+  // Register it in your router as: POST /api/classify
+  classifyNature(req, res) {
+    try {
+      const { fileList } = req.body;
+      if (!fileList || !Array.isArray(fileList)) {
+        return res.status(400).json({ error: 'fileList array is required' });
+      }
+      const result = detectProjectNature(fileList);
+      res.json(result);
+    } catch (err) {
+      res.status(500).json({ error: err.message });
     }
   }
 }

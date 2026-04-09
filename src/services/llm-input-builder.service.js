@@ -7,7 +7,6 @@ class LLMInputBuilder {
     this.MAX_FILE_CHARS  = 3000;
     this.MAX_TOTAL_CHARS = 20000;
 
-    // Smaller budget for local models (phi3 has 4k context)
     this.MAX_TOTAL_CHARS_LOCAL = 4000;
     this.MAX_FILE_CHARS_LOCAL  = 800;
 
@@ -29,8 +28,9 @@ class LLMInputBuilder {
   /**
    * @param {string} markdownContent
    * @param {Object} options
-   * @param {boolean} options.useAST   - true = AST mode (default), false = raw mode
-   * @param {string}  options.provider - 'groq' | 'ollama' — affects token budget
+   * @param {boolean} options.useAST       - true = AST mode (default), false = raw mode
+   * @param {string}  options.provider     - 'groq' | 'ollama'
+   * @param {string}  options.naturePrompt - injected by GeneratorController after classification
    */
   async build(markdownContent, options = {}) {
     const useAST  = options.useAST !== false;
@@ -47,8 +47,8 @@ class LLMInputBuilder {
     const enhanced = this.addMetadata(prepared, options);
 
     return useAST
-      ? this.formatForLLM_AST(enhanced, isLocal)
-      : this.formatForLLM_raw(enhanced);
+      ? this.formatForLLM_AST(enhanced, isLocal, options.naturePrompt)
+      : this.formatForLLM_raw(enhanced, options.naturePrompt);
   }
 
   parseMarkdown(content) {
@@ -99,7 +99,7 @@ class LLMInputBuilder {
     return { ...parsed, files };
   }
 
-  // ─── RAW MODE ────────────────────────────────────────────────
+  // ─── RAW MODE ────────────────────────────────────────────────────────────────
 
   applyTokenBudget(parsed, isLocal = false) {
     const MAX_FILE  = isLocal ? this.MAX_FILE_CHARS_LOCAL  : this.MAX_FILE_CHARS;
@@ -124,30 +124,62 @@ class LLMInputBuilder {
     return { ...parsed, files: kept, stats: { fileCount: kept.length, totalChars: total, mode: 'raw' } };
   }
 
-  formatForLLM_raw(content) {
+  formatForLLM_raw(content, naturePrompt = '') {
     const fileList  = content.files.map(f => `- ${f.path} (${f.size} chars)`).join('\n');
     const filesText = content.files.map(f => `### ${f.path}\n\`\`\`\n${f.content}\n\`\`\``).join('\n\n');
 
-    const prompt = `You are a senior software architect and technical writer.
+    // Nature-aware structure if available, otherwise hard fallback with mandatory diagram
+    const structureBlock = naturePrompt || `
+You MUST generate a complete README.md with ALL of the following sections.
+Do not skip any section. Do not replace the Architecture diagram with prose.
 
-Analyze this repository and produce professional documentation with:
-1. Project Overview
-2. Architecture
-3. Technologies & Dependencies
-4. Key Files & Modules
-5. Security Considerations
-6. Setup & Usage
-7. Uncertainties
+## 1. Project Overview
+## 2. Tech Stack
+## 3. Getting Started
+   - Prerequisites, installation, environment variables table
+## 4. API Reference (table: Method | Route | Description | Auth required)
+## 5. Architecture
 
-Repository: ${content.repository}
-Files (${content.stats.fileCount}): ${fileList}
+You MUST output this Mermaid block — replace node names with real ones from the code:
+
+\`\`\`mermaid
+flowchart TD
+  Input["Entry point"] --> Core
+  Core --> ServiceA
+  Core --> ServiceB
+  ServiceA --> DB["Database"]
+  ServiceB --> DB
+\`\`\`
+
+> ✏️ [Edit this diagram](https://mermaid.live)
+
+## 6. Environment Variables (table: Variable | Required | Description)
+## 7. Security Notes — name the exact algorithm found or omit this section entirely
+## 8. Setup & Usage
+## 9. Contributing
+
+Do NOT include an "Uncertainties" section.`.trim();
+
+    const prompt = `You are a senior software architect and technical writer producing a professional README.md.
+
+## Repository: ${content.repository}
+## Files (${content.stats.fileCount})
+${fileList}
+
+---
+
+${structureBlock}
+
+---
+
+## Source files
 
 ${filesText}`;
 
     return { messages: [{ role: 'user', content: prompt }], mode: 'raw' };
   }
 
-  // ─── AST MODE ────────────────────────────────────────────────
+  // ─── AST MODE ────────────────────────────────────────────────────────────────
 
   applyASTParsing(parsed, isLocal = false) {
     const MAX_TOTAL = isLocal ? this.MAX_TOTAL_CHARS_LOCAL : this.MAX_TOTAL_CHARS;
@@ -184,7 +216,7 @@ ${filesText}`;
     };
   }
 
-  formatForLLM_AST(content, isLocal = false) {
+  formatForLLM_AST(content, isLocal = false, naturePrompt = '') {
     const { files, repository, stats } = content;
 
     const allRoutes  = files.flatMap(f => f.ast?.expressRoutes || []);
@@ -204,9 +236,12 @@ ${filesText}`;
       allEnvVars.length ? `**Required env vars:** ${allEnvVars.join(', ')}` : '',
     ].filter(Boolean).join('\n');
 
-    // Shorter prompt for local models to fit phi3 context window
-    const prompt = isLocal
-      ? `You are a technical writer. Analyze this code and write concise documentation.
+    // ── Local model: tight budget, no diagram enforcement ─────────────────────
+    if (isLocal) {
+      return {
+        messages: [{
+          role: 'user',
+          content: `You are a technical writer. Write concise documentation for this repository.
 
 Repository: ${repository}
 Dependencies: ${allDeps.slice(0, 10).join(', ')}
@@ -217,34 +252,68 @@ Files:
 ${summaries}
 
 Write: Project Overview, Architecture, API Routes, Setup & Usage.`
+        }],
+        mode: 'ast'
+      };
+    }
 
-      : `You are a senior software architect and technical writer.
+    // ── Cloud model: nature-aware OR hard fallback with mandatory diagram ──────
+    const structureBlock = naturePrompt || `
+You MUST generate a complete README.md with ALL of the following sections.
+Do not skip any section. Do not replace the Architecture diagram with prose.
 
-Analyze the structured code intelligence below and produce professional documentation.
+## 1. Project Overview — what it does, who it's for
+## 2. Architecture
+
+You MUST output this Mermaid block — replace participant names with real ones from the code:
+
+\`\`\`mermaid
+sequenceDiagram
+  participant Client
+  participant Controller
+  participant Service
+  participant Repository
+  participant Database
+
+  Client->>Controller: POST /api/resource
+  Controller->>Service: processRequest(data)
+  Service->>Repository: findOrCreate(data)
+  Repository->>Database: SQL query
+  Database-->>Repository: result rows
+  Repository-->>Service: entity
+  Service-->>Controller: response DTO
+  Controller-->>Client: 201 Created { id, ... }
+\`\`\`
+
+> ✏️ [Edit this diagram](https://mermaid.live)
+
+## 3. Technologies & Dependencies — inferred from imports
+## 4. API Reference — table: Method | Route | Description | Auth required
+## 5. Key Modules — purpose of each file/class
+## 6. Environment Variables — table: Variable | Required | Description
+## 7. Security Notes — name the exact algorithm (BCrypt, JWT HS256) or omit entirely
+## 8. Setup & Usage — prerequisites, install, run command
+## 9. Contributing — branch strategy, PR process
+
+Do NOT include an "Uncertainties" section.`.trim();
+
+    const prompt = `You are a senior software architect and technical writer producing a professional README.md.
 
 ## Repository: ${repository}
 ## ${stats.fileCount} files analyzed, ${stats.parsedCount} parsed with AST
 
-## Cross-File Intelligence
+## Cross-file intelligence
 ${crossFile || 'None detected.'}
-
-## File Summaries
-${summaries}
 
 ---
 
-Produce documentation with:
-1. **Project Overview** — what it does, who it's for
-2. **Architecture** — layers, services, data flow
-3. **Technologies & Dependencies** — inferred from imports
-4. **API Reference** — routes and their likely purpose
-5. **Key Modules** — purpose of each file/class/function
-6. **Environment Configuration** — required env vars and their purpose
-7. **Security Notes** — observations from the code
-8. **Setup & Usage** — how to install and run
-9. **Uncertainties** — what cannot be determined from code alone
+${structureBlock}
 
-Be precise. Do not invent functionality not evidenced in the code. Flag gaps explicitly.`;
+---
+
+## File summaries
+
+${summaries}`;
 
     return { messages: [{ role: 'user', content: prompt }], mode: 'ast' };
   }
@@ -255,7 +324,7 @@ Be precise. Do not invent functionality not evidenced in the code. Flag gaps exp
       metadata: {
         timestamp:     new Date().toISOString(),
         source:        'github',
-        schemaVersion: '1.2',
+        schemaVersion: '1.4',
         mode:          parsedContent.stats?.mode || 'unknown',
         ...options.metadata
       }
