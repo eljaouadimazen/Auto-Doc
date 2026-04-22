@@ -122,14 +122,31 @@ class BaseAgent {
    * @returns {Object} Parsed JSON result
    */
   async callLLMJSON(userPrompt, fallback = null) {
-    const raw = await this.callLLM(userPrompt);
+    const strictPrompt = userPrompt + '\n\nIMPORTANT: Return ONLY valid JSON. Do not include any conversational text, explanations, or formatting.';
+    const raw = await this.callLLM(strictPrompt);
 
     try {
-      // Strip markdown code fences if present
-      const clean = raw
-        .replace(/^```(?:json)?\n?/m, '')
-        .replace(/\n?```$/m, '')
-        .trim();
+      const firstCurly = raw.indexOf('{');
+      const lastCurly = raw.lastIndexOf('}');
+      const firstSquare = raw.indexOf('[');
+      const lastSquare = raw.lastIndexOf(']');
+
+      let startIndex = -1;
+      let endIndex = -1;
+
+      if (firstCurly !== -1 && (firstSquare === -1 || firstCurly < firstSquare)) {
+        startIndex = firstCurly;
+        endIndex = lastCurly;
+      } else if (firstSquare !== -1) {
+        startIndex = firstSquare;
+        endIndex = lastSquare;
+      }
+
+      if (startIndex === -1 || endIndex === -1) {
+         throw new Error('No JSON object or array found in response');
+      }
+      
+      const clean = raw.substring(startIndex, endIndex + 1);
       return JSON.parse(clean);
     } catch (err) {
       console.warn(`[${this.name}] JSON parse failed — raw response: ${raw.slice(0, 200)}`);
