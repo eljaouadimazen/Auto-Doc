@@ -7,12 +7,21 @@
  * Output replaces raw file content with structured summaries,
  * dramatically reducing token usage while improving LLM output quality.
  */
+const LOGIC_PATTERNS = {
+  database:  /db\.|repository\.|prisma\.|mongoose\.|select\s+from|insert\s+into|update\s+|delete\s+from/i,
+  security:  /bcrypt|argon2|jwt\.sign|jwt\.verify|crypto\.|password|hash|compare/i,
+  network:   /fetch\(|axios\.|http\.|request\(|api\./i,
+  validation: /validate|joi\.|zod\.|check\(|isEmail|isURL/i,
+  fileSystem: /fs\.|path\.|readFile|writeFile|storage\./i,
+  messaging: /emit\(|on\(|publish|subscribe|kafka|rabbitmq/i
+};
 
 class ASTParserService {
   constructor() {
     this.JS_EXTENSIONS  = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs'];
     this.PY_EXTENSIONS  = ['.py'];
   }
+  
 
   /**
    * Main entry — parse a list of files, return structured summaries
@@ -117,21 +126,29 @@ class ASTParserService {
   }
 
   extractJSMethods(classBody) {
-    const methods = [];
-    // async? methodName(params) or get/set methodName(params)
-    const methodRegex = /(?:async\s+)?(?:get\s+|set\s+)?(\w+)\s*\(([^)]*)\)\s*(?::\s*[\w<>\[\]|]+)?\s*\{/g;
-    const SKIP = new Set(['if', 'for', 'while', 'switch', 'catch', 'function']);
-    let m;
-    while ((m = methodRegex.exec(classBody)) !== null) {
-      if (SKIP.has(m[1])) continue;
-      methods.push({
-        name:   m[1],
-        params: m[2].trim() ? m[2].split(',').map(p => p.trim()) : [],
-        async:  /async\s+/.test(classBody.slice(Math.max(0, m.index - 6), m.index + 1)),
-      });
-    }
-    return methods;
+  const methods = [];
+  const methodRegex = /(?:async\s+)?(?:get\s+|set\s+)?(\w+)\s*\(([^)]*)\)\s*(?::\s*[\w<>\[\]|]+)?\s*\{/g;
+  const SKIP = new Set(['if', 'for', 'while', 'switch', 'catch', 'function']);
+  
+  let m;
+  while ((m = methodRegex.exec(classBody)) !== null) {
+    if (SKIP.has(m[1])) continue;
+    
+    // NOUVEAU : On extrait le corps de la méthode pour analyse
+    const body = this.extractBlock(classBody, m.index); 
+    
+    methods.push({
+      name:   m[1],
+      params: m[2].trim() ? m[2].split(',').map(p => p.trim()) : [],
+      async:  /async\s+/.test(classBody.slice(Math.max(0, m.index - 6), m.index + 1)),
+      // AJOUT : Les signaux de logique détectés
+      logicSignals: this.extractLogicSignals(body),
+      // AJOUT : Un aperçu très court (3 lignes max) pour lever le flou
+      preview: body.split('\n').slice(1, 4).map(l => l.trim()).join(' ') 
+    });
   }
+  return methods;
+}
 
   extractJSFunctions(content) {
     const fns = [];
@@ -321,55 +338,33 @@ class ASTParserService {
    * Much cheaper than sending raw code
    */
   toSummary(file) {
-    if (!file.ast) {
-      // Non-parseable: truncate raw content
-      return `### ${file.path}\n${file.content.slice(0, 800)}${file.content.length > 800 ? '\n[truncated]' : ''}`;
-    }
+  if (!file.ast) return `### ${file.path}\n[Raw Content Truncated]`;
 
-    const a = file.ast;
-    const lines = [`### ${file.path} (${a.language})`];
+  const a = file.ast;
+  const summary = {
+    file: file.path,
+    nature: a.language,
+    deps: a.imports.map(i => i.specifier || i.module).slice(0, 5),
+    routes: a.expressRoutes,
+    logic: {
+      classes: a.classes.map(c => ({
+        name: c.name,
+        methods: c.methods.map(m => ({
+          sig: `${m.name}(${m.params.join(',')})`,
+          tags: m.logicSignals,
+          hint: m.preview.slice(0, 100) // Très court !
+        }))
+      })),
+      functions: a.functions.map(f => ({
+        name: f.name,
+        tags: this.extractLogicSignals(file.content) // Scan simplifié pour fns
+      }))
+    },
+    env: a.envAccess
+  };
 
-    if (a.imports?.length) {
-      const external = a.imports.filter(i => !i.specifier?.startsWith('.') && !i.module?.startsWith('.'));
-      if (external.length) {
-        lines.push(`**Dependencies:** ${external.map(i => i.specifier || i.module).join(', ')}`);
-      }
-    }
-
-    if (a.expressRoutes?.length) {
-      lines.push(`**Routes:** ${a.expressRoutes.map(r => `${r.method} ${r.path}`).join(', ')}`);
-    }
-
-    if (a.classes?.length) {
-      a.classes.forEach(c => {
-        const ext = c.extends ? ` extends ${c.extends}` : '';
-        const methods = c.methods.map(m => `${m.async ? 'async ' : ''}${m.name}(${m.params.join(', ')})`).join(', ');
-        lines.push(`**Class ${c.name}${ext}:** ${methods || 'no methods'}`);
-      });
-    }
-
-    if (a.functions?.length) {
-      const fns = a.functions.map(f => `${f.async ? 'async ' : ''}${f.name}(${f.params.join(', ')})`).join(', ');
-      lines.push(`**Functions:** ${fns}`);
-    }
-
-    if (a.envAccess?.length) {
-      lines.push(`**Env vars used:** ${a.envAccess.join(', ')}`);
-    }
-
-    if (a.docstring) {
-      lines.push(`**Module docstring:** ${a.docstring.slice(0, 200)}`);
-    }
-
-    if (a.jsdoc?.length) {
-      const meaningful = a.jsdoc.filter(d => d.description || d.target);
-      if (meaningful.length) {
-        lines.push(`**JSDoc:** ${meaningful.map(d => d.target ? `${d.target}: ${d.description || ''}` : d.description).slice(0, 3).join(' | ')}`);
-      }
-    }
-
-    return lines.join('\n');
-  }
+  return JSON.stringify(summary); // On renvoie du JSON pur, l'IA préfère ça.
+}
 }
 
 module.exports = new ASTParserService();
