@@ -2,13 +2,14 @@
 ---
 ## Purpose
 
-Auto-Doc is a secure AI-powered documentation generator for GitHub repositories. It fetches a public repository, analyzes its code structure using a custom regex-based AST parser, sanitizes any sensitive data, and generates professional documentation using the Groq LLM API (llama-3.3-70b-versatile).
+Auto-Doc is a secure AI-powered documentation generator for GitHub repositories, now powered by an agentic multi-agent system aligned with AST parsing and built using Object-Oriented Programming (OOP) principles. It fetches a public repository, analyzes its code structure through specialized agents, sanitizes sensitive data using entropy-based detection and custom rules, and generates professional documentation via Groq or OpenAI LLMs.
 
 ## Documentation Sections
 
-- [Architecture](ARCHITECTURE.md) — system layers and data flow
-- [Workflow](WORKFLOW.md) — step-by-step pipeline description
-- [Security](SECURITY.md) — secret detection and sanitization model
+- [Architecture](ARCHITECTURE.md) — system layers, OOP domain models, and agentic data flow
+- [OOP Architecture & Multi-Agent System](OOP_ARCHITECTURE.md) — detailed OOP models, agents, and orchestration
+- [Workflow](WORKFLOW.md) — agentic pipeline description with orchestrator roles
+- [Security](SECURITY.md) — agent-level secret detection, entropy-based sanitization, and audit trails
 - [CI/CD Pipeline](CI-CD.md) — GitHub Actions automation
 
 

@@ -5,7 +5,7 @@
   "main": "src/app.js",
   "scripts": {
     "start": "node src/app.js",
-    "dev": "nodemon src/app.js",
+    "dev": "fuser -k 3000/tcp || true && nodemon src/app.js",
     "test": "echo \"Error: no test specified\" && exit 1",
     "generate:ci": "node scripts/generate-docs-ci.js"
   },
@@ -25,7 +25,8 @@
     "langchain": "^1.2.37",
     "node-fetch": "^2.7.0",
     "openai": "^6.24.0",
-    "simple-git": "^3.15.1"
+    "simple-git": "^3.15.1",
+    "undici": "^8.1.0"
   },
   "devDependencies": {
     "nodemon": "^2.0.20"
