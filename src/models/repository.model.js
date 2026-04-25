@@ -123,7 +123,11 @@ class Repository {
     }
 
     this.#documentation = new Documentation(docContent, stats);
-    return this.#documentation;
+    return {
+  content: this.#documentation.content,
+  stats:   this.#documentation.stats,
+  audit:   this.#auditLog.GetSummary()   // add this
+      }   ;
   }
-}
+} 
 module.exports = Repository;

@@ -1,6 +1,8 @@
 const User = require('../models/user.model');
 const Repository = require('../models/repository.model');
 const llmInputBuilder = require('../services/llm-input-builder.service');
+const llmService = require('../services/llm.service');
+const sanitizerService = require('../services/sanitizer.service');
 
 // Utility to construct the User domain model per request context
 function getUserContext(req) {
@@ -35,7 +37,8 @@ class GeneratorController {
         rawMarkdown: rawMarkdown,
         repoName: repository.name,
         size: rawMarkdown.length,
-        preview: rawMarkdown.substring(0, 1000)
+        preview: rawMarkdown.substring(0, 1000),
+        auditSummary: repository.auditLog.GetSummary()
       });
     } catch (err) {
       console.error('[fetchRepo]', err.message);
@@ -48,13 +51,11 @@ class GeneratorController {
     try {
       const { files, rawMarkdown, useAST } = req.body;
       const context = rawMarkdown || (files ? files.map(f => f.content).join('\n') : '');
-      const messages = llmInputBuilder.build(context, useAST);
-
+      const built = llmInputBuilder.build(context, useAST);
       res.json({
-        step: 'build',
-        messages,
-        mode: useAST ? 'AST' : 'Raw',
-        auditSummary: {} // Audit logic is encapsulated in the models per session
+      step: 'build',
+      messages: built.messages,
+      mode: built.mode || (useAST ? 'AST' : 'Raw'),
       });
     } catch (err) {
       console.error('[buildInput]', err.message);
@@ -84,7 +85,8 @@ class GeneratorController {
           step: 'generate',
           documentation: docs.content,
           mode: 'agentic',
-          stats: docs.stats
+          stats: docs.stats,
+          auditSummary:  docs.audit 
         });
       }
 
