@@ -1,0 +1,83 @@
+name: Auto-Doc - Generate and Publish Documentation
+
+on:
+  push:
+    branches:
+      - main
+      - master
+      - dev
+    paths:
+      - 'src/**'
+      - 'package.json'
+      - 'package-lock.json'
+
+  workflow_dispatch:
+    inputs:
+      force:
+        description: 'Force regeneration even if no structural changes'
+        required: false
+        default: 'false'
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+jobs:
+  generate-and-deploy:
+    name: Generate Documentation
+    runs-on: ubuntu-latest
+
+    steps:
+
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+          cache: 'npm'
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Semantic diff - detect structural changes
+        id: semantic
+        run: node scripts/semantic-diff.js
+        env:
+          GITHUB_SHA:      ${{ github.sha }}
+          GITHUB_BASE_SHA: ${{ github.event.before }}
+          FORCE:           ${{ github.event.inputs.force || 'false' }}
+
+      - name: Generate documentation
+        if: steps.semantic.outputs.skip == 'false'
+        env:
+          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO_URL:     ${{ github.server_url }}/${{ github.repository }}
+          GROQ_MODEL:   llama-3.3-70b-versatile
+        run: node scripts/generate-docs-ci.js
+
+      - name: Deploy to GitHub Pages
+        if: steps.semantic.outputs.skip == 'false'
+        uses: peaceiris/actions-gh-pages@v3
+        with:
+          github_token:   ${{ secrets.GITHUB_TOKEN }}
+          publish_dir:    ./docs
+          publish_branch: gh-pages
+          commit_message: "docs: auto-generated [${{ github.sha }}]"
+
+      - name: Summary
+        run: |
+          if [ "${{ steps.semantic.outputs.skip }}" = "true" ]; then
+            echo "## Skipped - no structural changes" >> $GITHUB_STEP_SUMMARY
+            echo "Only internal logic was modified. Documentation is still up to date." >> $GITHUB_STEP_SUMMARY
+            echo "**Changed files:** ${{ steps.semantic.outputs.changed_files }}" >> $GITHUB_STEP_SUMMARY
+          else
+            echo "## Documentation generated and deployed" >> $GITHUB_STEP_SUMMARY
+            echo "**Structural changes detected in:** ${{ steps.semantic.outputs.changed_files }}" >> $GITHUB_STEP_SUMMARY
+            echo "View at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> $GITHUB_STEP_SUMMARY
+          fi

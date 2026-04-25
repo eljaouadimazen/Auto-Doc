@@ -1,0 +1,422 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Auto-Doc</title>
+  <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+  <style>
+    .btn { transition: all 0.15s ease; }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important; }
+    .btn:not(:disabled):active { transform: scale(0.96); }
+
+    #output-rendered h1 { font-size:1.5rem; font-weight:700; margin:1rem 0 .5rem; color:#a7f3d0; }
+    #output-rendered h2 { font-size:1.2rem; font-weight:600; margin:.8rem 0 .4rem; color:#6ee7b7; border-bottom:1px solid #1e3a2f; padding-bottom:4px; }
+    #output-rendered h3 { font-size:1rem; font-weight:600; margin:.6rem 0 .3rem; color:#34d399; }
+    #output-rendered p  { margin:.4rem 0; line-height:1.6; color:#cbd5e1; }
+    #output-rendered ul { list-style:disc; padding-left:1.5rem; color:#94a3b8; }
+    #output-rendered ol { list-style:decimal; padding-left:1.5rem; color:#94a3b8; }
+    #output-rendered li { margin:.2rem 0; }
+    #output-rendered code { background:#0f2213; color:#6ee7b7; padding:1px 5px; border-radius:3px; font-size:.85em; }
+    #output-rendered pre { background:#0a1a10; border:1px solid #1e3a2f; padding:1rem; border-radius:8px; overflow-x:auto; margin:.6rem 0; }
+    #output-rendered pre code { background:none; padding:0; }
+    #output-rendered strong { color:#e2e8f0; }
+
+    @keyframes pulse-dot { 0%,100%{opacity:1} 50%{opacity:.3} }
+    .loading-dot { animation: pulse-dot 1.2s ease-in-out infinite; }
+    .loading-dot:nth-child(2) { animation-delay:.2s; }
+    .loading-dot:nth-child(3) { animation-delay:.4s; }
+
+    .toggle-on  { background: #059669; }
+    .toggle-off { background: #374151; }
+
+    /* Key status colors */
+    .key-valid   { border-color: #059669 !important; }
+    .key-invalid { border-color: #dc2626 !important; }
+  </style>
+</head>
+
+<body class="min-h-screen bg-gradient-to-br from-slate-900 via-slate-800 to-slate-900 text-slate-100">
+<div class="max-w-4xl mx-auto py-10 px-4">
+
+  <!-- HEADER -->
+  <div class="text-center mb-8">
+    <div class="inline-flex items-center gap-2 bg-emerald-900/30 border border-emerald-700/40 px-4 py-1.5 rounded-full text-emerald-400 text-xs font-mono mb-4">
+      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse"></span>
+      Auto-Doc v0.3
+    </div>
+    <h1 class="text-3xl font-bold tracking-tight">Repository Documentation Generator</h1>
+    <p class="text-slate-400 text-sm mt-2">Secure AI-powered docs from any GitHub repo</p>
+  </div>
+
+  <!-- MAIN CARD -->
+  <div class="bg-white/5 backdrop-blur-lg border border-white/10 rounded-2xl shadow-2xl p-8">
+
+    <!-- ── API KEY PANEL ───────────────────────────────────────── -->
+    <div class="mb-6 p-4 bg-slate-900/80 rounded-xl border border-slate-700">
+
+      <div class="flex items-center justify-between mb-3">
+        <div class="flex items-center gap-2">
+          <span class="text-sm font-semibold">🔑 Groq API Key</span>
+          <span id="key-badge" class="text-xs font-mono px-2 py-0.5 rounded-full bg-slate-700 text-slate-400 border border-slate-600">
+            not set
+          </span>
+        </div>
+        <a href="https://console.groq.com/keys" target="_blank"
+          class="text-xs text-emerald-400 hover:text-emerald-300 transition font-mono underline">
+          Get a free key ↗
+        </a>
+      </div>
+
+      <div class="flex gap-2">
+        <input
+          type="password"
+          id="apiKey"
+          placeholder="gsk_... (paste your Groq key — not stored anywhere)"
+          class="flex-1 px-3 py-2 rounded-lg bg-slate-800 border border-slate-600 focus:border-emerald-500 focus:ring-1 focus:ring-emerald-500/30 outline-none transition font-mono text-xs text-slate-300"
+        />
+        <button onclick="validateKey()"
+          class="btn px-4 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs font-medium whitespace-nowrap">
+          Validate
+        </button>
+        <button onclick="toggleKeyVisibility()"
+          id="key-eye"
+          class="btn px-3 py-2 bg-slate-700 hover:bg-slate-600 rounded-lg text-xs">
+          👁
+        </button>
+      </div>
+
+      <p class="text-xs text-slate-500 mt-2 font-mono">
+        Your key is sent directly to Groq via your own browser session — never stored on our server.
+        If no key is entered, the server's default key is used.
+      </p>
+    </div>
+
+    <!-- ── URL INPUT ──────────────────────────────────────────── -->
+    <div class="mb-4">
+      <label class="block text-xs text-slate-400 font-mono mb-1.5 uppercase tracking-widest">GitHub Repository URL</label>
+      <input type="url" id="githubUrl"
+        class="w-full px-4 py-3 rounded-lg bg-slate-900 border border-slate-700 focus:border-emerald-500 focus:ring-2 focus:ring-emerald-500/30 outline-none transition font-mono text-sm"
+        placeholder="https://github.com/username/repository" />
+    </div>
+
+    <!-- ── AST TOGGLE ─────────────────────────────────────────── -->
+    <div class="flex items-center gap-3 mb-6 p-3 bg-slate-900/60 rounded-xl border border-slate-700">
+      <button id="ast-toggle" onclick="toggleAST()"
+        class="relative w-11 h-6 rounded-full transition-colors toggle-on focus:outline-none">
+        <span id="ast-knob" class="absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform translate-x-5"></span>
+      </button>
+      <div>
+        <div class="text-sm font-medium">
+          AST Mode
+          <span id="ast-badge" class="text-xs bg-emerald-900/50 text-emerald-400 border border-emerald-700/50 px-2 py-0.5 rounded-full font-mono ml-1">ON</span>
+        </div>
+        <div id="ast-desc" class="text-xs text-slate-400 mt-0.5">
+          Extracts code structure — fewer tokens, smarter docs
+        </div>
+      </div>
+    </div>
+
+    <!-- ── PIPELINE STEPS ─────────────────────────────────────── -->
+    <div class="grid grid-cols-3 gap-3 mb-6">
+      <div class="bg-slate-900/60 rounded-xl p-4 border border-slate-700">
+        <div class="text-xs text-slate-500 font-mono mb-1">STEP 1</div>
+        <div class="text-sm font-semibold mb-3 text-blue-300">Fetch & Sanitize</div>
+        <button id="btn-fetch" onclick="fetchRepo()"
+          class="btn w-full py-2 bg-blue-600 hover:bg-blue-500 rounded-lg text-sm font-medium">
+          Fetch Repo
+        </button>
+      </div>
+      <div class="bg-slate-900/60 rounded-xl p-4 border border-slate-700">
+        <div class="text-xs text-slate-500 font-mono mb-1">STEP 2</div>
+        <div class="text-sm font-semibold mb-3 text-yellow-300">Build LLM Input</div>
+        <button id="btn-build" onclick="buildInput()" disabled
+          class="btn w-full py-2 bg-yellow-600 hover:bg-yellow-500 rounded-lg text-sm font-medium">
+          Build Input
+        </button>
+      </div>
+      <div class="bg-slate-900/60 rounded-xl p-4 border border-slate-700">
+        <div class="text-xs text-slate-500 font-mono mb-1">STEP 3</div>
+        <div class="text-sm font-semibold mb-3 text-emerald-300">Generate Docs</div>
+        <button id="btn-generate" onclick="generateDocs()" disabled
+          class="btn w-full py-2 bg-emerald-600 hover:bg-emerald-500 rounded-lg text-sm font-medium">
+          Generate Docs
+        </button>
+      </div>
+    </div>
+
+    <!-- ── STATUS + ERROR ─────────────────────────────────────── -->
+    <div id="status-bar" class="hidden items-center gap-2 text-xs font-mono text-slate-400 mb-4 px-1">
+      <div class="flex gap-1">
+        <span class="loading-dot w-1.5 h-1.5 bg-emerald-400 rounded-full"></span>
+        <span class="loading-dot w-1.5 h-1.5 bg-emerald-400 rounded-full"></span>
+        <span class="loading-dot w-1.5 h-1.5 bg-emerald-400 rounded-full"></span>
+      </div>
+      <span id="status-text">Working...</span>
+    </div>
+    <div id="error-box" class="hidden bg-red-950/50 border border-red-800 text-red-300 text-sm px-4 py-3 rounded-lg mb-4 font-mono"></div>
+    <div id="mode-badge" class="hidden mb-3 text-xs font-mono"></div>
+
+    <!-- ── OUTPUT TABS ────────────────────────────────────────── -->
+    <div class="flex gap-2 mb-2">
+      <button onclick="setTab('raw')" id="tab-raw"
+        class="text-xs px-3 py-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition font-mono">Raw</button>
+      <button onclick="setTab('rendered')" id="tab-rendered"
+        class="text-xs px-3 py-1.5 rounded-lg bg-slate-800 text-slate-400 hover:text-white transition font-mono">Rendered</button>
+    </div>
+
+    <pre id="output-raw"
+      class="bg-slate-950 border border-slate-800 text-emerald-400 p-4 rounded-xl overflow-auto h-96 text-xs leading-relaxed shadow-inner font-mono">
+Ready. Paste a GitHub URL and click Fetch Repo.</pre>
+
+    <div id="output-rendered"
+      class="hidden bg-slate-950 border border-slate-800 p-6 rounded-xl overflow-auto h-96 text-sm leading-relaxed shadow-inner">
+    </div>
+
+  </div>
+
+  <!-- PIPELINE STATE -->
+  <div class="flex justify-center gap-6 mt-6 text-xs font-mono text-slate-500">
+    <span id="state-fetch">○ fetch</span>
+    <span class="text-slate-700">→</span>
+    <span id="state-build">○ build</span>
+    <span class="text-slate-700">→</span>
+    <span id="state-generate">○ generate</span>
+  </div>
+
+</div>
+
+<script>
+let RAW      = null;
+let MESSAGES = null;
+let USE_AST  = true;
+
+// ── Key helpers ───────────────────────────────────────────────────
+function getKey() {
+  return document.getElementById('apiKey').value.trim() || null;
+}
+
+function authHeaders() {
+  const key = getKey();
+  const headers = { 'Content-Type': 'application/json' };
+  if (key) headers['x-api-key'] = key;
+  return headers;
+}
+
+function setKeyBadge(state, text) {
+  const badge = document.getElementById('key-badge');
+  const input = document.getElementById('apiKey');
+  badge.textContent = text;
+
+  // reset classes
+  badge.className = 'text-xs font-mono px-2 py-0.5 rounded-full border';
+  input.classList.remove('key-valid', 'key-invalid');
+
+  if (state === 'valid') {
+    badge.classList.add('bg-emerald-900/50', 'text-emerald-400', 'border-emerald-700/50');
+    input.classList.add('key-valid');
+  } else if (state === 'invalid') {
+    badge.classList.add('bg-red-900/50', 'text-red-400', 'border-red-700/50');
+    input.classList.add('key-invalid');
+  } else {
+    badge.classList.add('bg-slate-700', 'text-slate-400', 'border-slate-600');
+  }
+}
+
+async function validateKey() {
+  const key = getKey();
+  if (!key) { setKeyBadge('neutral', 'not set'); return; }
+
+  setKeyBadge('neutral', 'checking...');
+
+  try {
+    const res  = await fetch('/validate-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', 'x-api-key': key }
+    });
+    const data = await res.json();
+
+    if (data.valid) {
+      setKeyBadge('valid', '✓ valid');
+    } else {
+      setKeyBadge('invalid', '✗ ' + (data.reason || 'invalid'));
+    }
+  } catch (err) {
+    setKeyBadge('invalid', '✗ check failed');
+  }
+}
+
+function toggleKeyVisibility() {
+  const input = document.getElementById('apiKey');
+  input.type = input.type === 'password' ? 'text' : 'password';
+}
+
+// Auto-validate when user stops typing (debounced)
+let keyTimer;
+document.addEventListener('DOMContentLoaded', () => {
+  document.getElementById('apiKey').addEventListener('input', () => {
+    clearTimeout(keyTimer);
+    setKeyBadge('neutral', 'typing...');
+    keyTimer = setTimeout(validateKey, 800);
+  });
+});
+
+// ── AST Toggle ────────────────────────────────────────────────────
+function toggleAST() {
+  USE_AST = !USE_AST;
+  document.getElementById('ast-toggle').className =
+    `relative w-11 h-6 rounded-full transition-colors focus:outline-none ${USE_AST ? 'toggle-on' : 'toggle-off'}`;
+  document.getElementById('ast-knob').className =
+    `absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full shadow transition-transform ${USE_AST ? 'translate-x-5' : 'translate-x-0'}`;
+  document.getElementById('ast-badge').textContent = USE_AST ? 'ON' : 'OFF';
+  if (RAW) MESSAGES = null;
+  resetButtons();
+}
+
+// ── Tabs ──────────────────────────────────────────────────────────
+function setTab(tab) {
+  document.getElementById('output-raw').classList.toggle('hidden', tab !== 'raw');
+  document.getElementById('output-rendered').classList.toggle('hidden', tab !== 'rendered');
+  document.getElementById('tab-raw').classList.toggle('bg-slate-700', tab === 'raw');
+  document.getElementById('tab-rendered').classList.toggle('bg-slate-700', tab === 'rendered');
+}
+
+// ── UI helpers ────────────────────────────────────────────────────
+function setLoading(on, text = 'Working...') {
+  const bar = document.getElementById('status-bar');
+  bar.classList.toggle('hidden', !on);
+  bar.classList.toggle('flex', on);
+  document.getElementById('status-text').textContent = text;
+  ['btn-fetch','btn-build','btn-generate'].forEach(id => {
+    document.getElementById(id).disabled = on;
+  });
+}
+
+function showError(msg) {
+  const b = document.getElementById('error-box');
+  b.textContent = '⚠ ' + msg;
+  b.classList.remove('hidden');
+}
+
+function clearError() {
+  document.getElementById('error-box').classList.add('hidden');
+}
+
+function setOutput(text) {
+  document.getElementById('output-raw').textContent = text;
+  try { document.getElementById('output-rendered').innerHTML = marked.parse(text); }
+  catch(e) { document.getElementById('output-rendered').textContent = text; }
+}
+
+function showModeBadge(mode) {
+  const el = document.getElementById('mode-badge');
+  el.classList.remove('hidden');
+  el.innerHTML = mode === 'ast'
+    ? `<span class="bg-emerald-900/40 text-emerald-400 border border-emerald-700/40 px-3 py-1 rounded-full">⚡ AST mode</span>`
+    : `<span class="bg-slate-800 text-slate-400 border border-slate-600 px-3 py-1 rounded-full">📄 Raw mode</span>`;
+}
+
+function updateState(step) {
+  const colors = { fetch:'text-blue-400', build:'text-yellow-400', generate:'text-emerald-400' };
+  const el = document.getElementById('state-' + step);
+  if (el) { el.textContent = '● ' + step; el.className = colors[step] + ' font-bold'; }
+}
+
+function resetButtons() {
+  document.getElementById('btn-fetch').disabled    = false;
+  document.getElementById('btn-build').disabled    = !RAW;
+  document.getElementById('btn-generate').disabled = !MESSAGES;
+}
+
+// ── STEP 1 ────────────────────────────────────────────────────────
+async function fetchRepo() {
+  clearError();
+  const githubUrl = document.getElementById('githubUrl').value.trim();
+  if (!githubUrl) { showError('Enter a GitHub URL'); return; }
+  if (!githubUrl.includes('github.com')) { showError('Must be a github.com URL'); return; }
+
+  setLoading(true, 'Fetching repository...');
+  setOutput('Fetching...');
+
+  try {
+    const res  = await fetch('/fetch', { method:'POST', headers: authHeaders(), body: JSON.stringify({ githubUrl }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Fetch failed');
+
+    RAW = data.rawMarkdown;
+    MESSAGES = null;
+    setOutput(`✓ FETCH COMPLETE\n\nSize: ${data.size} chars\n\n--- PREVIEW ---\n\n${data.preview}`);
+    updateState('fetch');
+    document.getElementById('mode-badge').classList.add('hidden');
+  } catch (err) {
+    showError(err.message);
+    setOutput('Fetch failed.');
+  } finally {
+    setLoading(false);
+    resetButtons();
+  }
+}
+
+// ── STEP 2 ────────────────────────────────────────────────────────
+async function buildInput() {
+  clearError();
+  if (!RAW) { showError('Run Fetch Repo first'); return; }
+
+  setLoading(true, `Building ${USE_AST ? 'AST' : 'raw'} LLM input...`);
+  setOutput('Building...');
+
+  try {
+    const res  = await fetch('/build', { method:'POST', headers: authHeaders(), body: JSON.stringify({ rawMarkdown: RAW, useAST: USE_AST }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Build failed');
+
+    MESSAGES = data.messages;
+    showModeBadge(data.mode);
+
+    let summary = `✓ BUILD COMPLETE [mode: ${data.mode}]`;
+    if (data.auditSummary) {
+      const a = data.auditSummary;
+      summary += `\n\nSecurity audit: ${a.filesScanned} files scanned`;
+      summary += a.totalRedacted > 0
+        ? `\n⚠ ${a.totalRedacted} secret(s) redacted in ${a.filesAffected} file(s)`
+        : '\n✓ No secrets detected';
+    }
+    setOutput(summary);
+    updateState('build');
+  } catch (err) {
+    showError(err.message);
+    setOutput('Build failed.');
+  } finally {
+    setLoading(false);
+    resetButtons();
+  }
+}
+
+// ── STEP 3 ────────────────────────────────────────────────────────
+async function generateDocs() {
+  clearError();
+  if (!MESSAGES) { showError('Run Build Input first'); return; }
+
+  setLoading(true, 'Calling LLM — this may take 10–20 seconds...');
+  setOutput('Generating documentation...');
+
+  try {
+    const res  = await fetch('/generate-docs', { method:'POST', headers: authHeaders(), body: JSON.stringify({ messages: MESSAGES }) });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.error || 'Generation failed');
+
+    setOutput(data.documentation);
+    updateState('generate');
+    setTab('rendered');
+  } catch (err) {
+    showError(err.message);
+    setOutput('Generation failed.');
+  } finally {
+    setLoading(false);
+    resetButtons();
+  }
+}
+</script>
+</body>
+</html>
