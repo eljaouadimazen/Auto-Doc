@@ -1,5 +1,9 @@
 # System Workflow
 
+## Overview
+
+Auto-Doc processes a GitHub repository through an agentic multi-agent pipeline orchestrated by the `EnforcedOrchestrator`.
+
 ## Manual Pipeline (Web Interface)
 
 The web UI exposes the pipeline as 3 explicit steps so users can inspect intermediate results before proceeding.
