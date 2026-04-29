@@ -149,6 +149,17 @@ class ASTParserService {
   }
   return methods;
 }
+extractLogicSignals(code) {
+  if (!code || typeof code !== 'string') return [];
+  return Object.entries(LOGIC_PATTERNS)
+    .filter(([, regex]) => {
+      regex.lastIndex = 0;
+      const match = regex.test(code);
+      regex.lastIndex = 0;
+      return match;
+    })
+    .map(([name]) => name);
+}
 
   extractJSFunctions(content) {
     const fns = [];

@@ -13,15 +13,19 @@ export default function App() {
   const [githubUrl,     setGithubUrl]     = useState('')
   const [useAST,        setUseAST]        = useState(true)
   const [provider,      setProvider]      = useState('groq')
-  const [pipelineMode,  setPipelineMode]  = useState('classic') 
-  
-  // Data State
-  const [raw,           setRaw]           = useState(null)      // String for Preview
-  const [rawFiles,      setRawFiles]      = useState([])        // Array for Agentic Pipeline
-  const [repoName,      setRepoName]      = useState('')        // Parsed Repo Name
-  const [messages,      setMessages]      = useState(null)
-  
-  // UI State
+  const [pipelineMode,  setPipelineMode]  = useState('classic')
+
+  const [raw,           setRaw]           = useState(null)
+  const [rawFiles,      setRawFiles]      = useState([])
+  const [repoName,      setRepoName]      = useState('')
+
+  // FIX: renamed from messages → chunks to match the new builder API.
+  // buildInput now returns chunks[] (array of { messages, chunkIndex, ... })
+  // instead of a flat messages[]. The PipelineSteps component uses this as a
+  // truthy guard to enable the Generate button — keeping the same state var
+  // name would work too, but chunks is clearer about what's actually stored.
+  const [chunks,        setChunks]        = useState(null)
+
   const [output,        setOutput]        = useState('Ready. Paste a GitHub URL and click Fetch Repo.')
   const [loading,       setLoading]       = useState(false)
   const [loadingMsg,    setLoadingMsg]    = useState('Working...')
@@ -43,27 +47,25 @@ export default function App() {
 
   // --- PIPELINE ACTIONS ---
 
-  // STEP 1: FETCH
   const fetchRepo = useCallback(async () => {
     if (!githubUrl) { setError('Enter a GitHub URL'); return }
     setError(null); setLoading(true); setLoadingMsg('Fetching repository...')
-    setOutput('Fetching...'); setRaw(null); setRawFiles([]); setMessages(null)
+    setOutput('Fetching...'); setRaw(null); setRawFiles([]); setChunks(null)
     setPipelineState({ fetch: false, build: false, generate: false })
 
     try {
-      const res  = await fetch('/fetch', { 
-        method: 'POST', 
-        headers: authHeaders(), 
-        body: JSON.stringify({ githubUrl }) 
+      const res  = await fetch('/fetch', {
+        method:  'POST',
+        headers: authHeaders(),
+        body:    JSON.stringify({ githubUrl })
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Fetch failed')
-      
-      // FIX: Store both the string for UI and array for logic
-      setRaw(data.rawMarkdown) 
-      setRawFiles(data.files)  
+
+      setRaw(data.rawMarkdown)
+      setRawFiles(data.files)
       setRepoName(data.repoName)
-      
+
       setOutput(`✓ FETCH COMPLETE\n\nSize: ${data.size} chars\n\n--- PREVIEW ---\n\n${data.preview}`)
       setPipelineState(s => ({ ...s, fetch: true }))
     } catch (err) {
@@ -71,99 +73,116 @@ export default function App() {
     } finally { setLoading(false) }
   }, [githubUrl, authHeaders])
 
-  // STEP 2: BUILD
   const buildInput = useCallback(async () => {
-    if (!rawFiles.length) { setError('Run Fetch Repo first'); return }
-
-    // Logic shift: Agentic mode skips the manual LLM input building step
-    if (pipelineMode === 'agentic') {
-      setMessages(['agentic_placeholder']) 
-      setMode('agentic')
-      setOutput('✓ READY FOR AGENTIC GENERATION\n\nThe Orchestrator will now handle input preparation automatically.')
-      setPipelineState(s => ({ ...s, build: true }))
+    if (!rawFiles || rawFiles.length === 0) {
+      setError('Run Fetch Repo first')
       return
     }
 
-    setError(null); setLoading(true); setLoadingMsg(`Building LLM input...`)
+    setError(null); setLoading(true); setLoadingMsg('Building LLM input...')
+
     try {
-      const res  = await fetch('/build', { 
-        method: 'POST', 
-        headers: authHeaders(), 
-        body: JSON.stringify({ files: rawFiles, useAST }) 
+      const res  = await fetch('/build', {
+        method:  'POST',
+        headers: authHeaders(),
+        body:    JSON.stringify({
+          rawMarkdown: raw,
+          files:       rawFiles,
+          useAST
+        })
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Build failed')
-      
-      setMessages(data.messages)
+
+      // FIX: store chunks[], not messages[]
+      // The backend now returns data.chunks (array of batches) instead of data.messages.
+      setChunks(data.chunks)
       setMode(data.mode)
       setAuditSummary(data.auditSummary)
-      setOutput(`✓ BUILD COMPLETE [mode: ${data.mode}]\n\nSecurity audit: ${data.auditSummary.filesScanned} files scanned`)
+
+      const audit = data.auditSummary || {}
+      const findingsText = audit.findings?.length > 0
+        ? `\n⚠ Detected patterns:\n` +
+          audit.findings
+            .map(f => `  ${f.path}\n    → ${f.patterns.join(', ')}`)
+            .join('\n')
+        : '\n✓ No sensitive data detected'
+
+      setOutput(
+        `✓ BUILD COMPLETE [mode: ${data.mode}]\n\n` +
+        `Files scanned:    ${audit.filesScanned  || 0}\n` +
+        `Files affected:   ${audit.filesAffected || 0}\n` +
+        `Secrets redacted: ${audit.totalRedacted || 0}\n` +
+        `Chunks created:   ${data.totalChunks    || 1}\n` +
+        `Vault entries:    ${data.vaultSize       || 0}\n` +
+        findingsText
+      )
+
       setPipelineState(s => ({ ...s, build: true }))
     } catch (err) {
       setError(err.message); setOutput('Build failed.')
     } finally { setLoading(false) }
-  }, [rawFiles, useAST, authHeaders, pipelineMode])
+  }, [rawFiles, raw, useAST, authHeaders])
 
-  // STEP 3: GENERATE
   const generateDocs = useCallback(async () => {
-    if (!messages) { setError('Run Build Input first'); return }
+    // FIX: guard on chunks, not messages
+    if (!chunks || chunks.length === 0) { setError('Run Build Input first'); return }
     setError(null); setLoading(true)
-    setLoadingMsg('Calling Pipeline...')
+    setLoadingMsg(`Generating documentation (${chunks.length} chunk${chunks.length > 1 ? 's' : ''})...`)
 
     try {
       const res = await fetch('/generate-docs', {
         method:  'POST',
         headers: authHeaders(),
         body:    JSON.stringify({
-          messages,
-          files: rawFiles, // Critical: Send the actual structured array
+          // FIX: send chunks, not messages — the backend's classic mode
+          // now expects chunks[] and iterates them, calling the LLM once
+          // per chunk and reintegrating vault tokens after each response.
+          chunks:   chunks,
+          files:    rawFiles,
           repoName: repoName
         })
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Generation failed')
-      
+
       setOutput(data.documentation)
       setPipelineState(s => ({ ...s, generate: true }))
       setTab('rendered')
     } catch (err) {
       setError(err.message); setOutput('Generation failed.')
     } finally { setLoading(false) }
-  }, [messages, rawFiles, repoName, authHeaders])
+  }, [chunks, rawFiles, repoName, authHeaders])
 
-  // --- RENDER ---
   return (
     <div style={{ maxWidth: 900, margin: '0 auto', padding: '2.5rem 1.5rem', minHeight: '100vh' }}>
       <header style={{ textAlign: 'center', marginBottom: '2.5rem' }}>
         <div style={{ display: 'inline-flex', alignItems: 'center', gap: 8, background: 'rgba(34,197,94,0.08)', border: '1px solid rgba(34,197,94,0.2)', padding: '6px 16px', borderRadius: 999, marginBottom: 20 }}>
-          <span style={{ width: 7, height: 7, borderRadius: '50%', background: 'var(--accent)', display: 'inline-block' }} />
-          <span style={{ color: 'var(--accent)', fontSize: '.72rem', fontFamily: 'var(--font-mono)', letterSpacing: 2 }}>AUTO-DOC v0.5</span>
+          <span style={{ width: 7, height: 7, borderRadius: '50%', background: '#22c55e', display: 'inline-block' }} />
+          <span style={{ color: '#22c55e', fontSize: '.72rem', fontFamily: 'monospace', letterSpacing: 2 }}>AUTO-DOC v0.5</span>
         </div>
-        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: 'clamp(1.6rem, 4vw, 2.4rem)', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)', marginBottom: 10 }}>
+        <h1 style={{ fontSize: 'clamp(1.6rem, 4vw, 2.4rem)', fontWeight: 800, letterSpacing: '-0.02em', color: 'var(--text-primary)', marginBottom: 10 }}>
           Repository Documentation Generator
         </h1>
       </header>
 
       <div style={{ position: 'relative', background: 'var(--bg-card)', border: '1px solid var(--border)', borderRadius: 16, padding: '2rem', boxShadow: '0 20px 40px rgba(0,0,0,0.4)' }}>
-        
-        {/* Settings Toggle */}
-        <button 
-          onClick={() => setShowSettings(!showSettings)} 
-          style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: showSettings ? 'var(--accent)' : 'var(--bg-elevated)', color: showSettings ? '#000' : 'var(--text-muted)', border: '1px solid var(--border)', padding: '6px 12px', borderRadius: 8, fontSize: '.7rem', cursor: 'pointer', zIndex: 10 }}
+
+        <button
+          onClick={() => setShowSettings(!showSettings)}
+          style={{ position: 'absolute', top: '1.5rem', right: '1.5rem', background: showSettings ? '#22c55e' : 'var(--bg-elevated)', color: showSettings ? '#000' : 'var(--text-muted)', border: '1px solid var(--border)', padding: '6px 12px', borderRadius: 8, fontSize: '.7rem', cursor: 'pointer', zIndex: 10 }}
         >
           {showSettings ? '✕ Close Settings' : '⚙ Advanced Settings'}
         </button>
 
-        {/* Pipeline Selection */}
         <div style={{ marginBottom: '1.5rem' }}>
           <label style={{ display: 'block', fontSize: '.68rem', color: 'var(--text-muted)', letterSpacing: 2, marginBottom: 10, textTransform: 'uppercase' }}>Pipeline Mode</label>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
-            <ModeButton active={pipelineMode === 'classic'} onClick={() => setPipelineMode('classic')} icon="⚡" label="Classic" desc="AST parser · single LLM call" color="#fbbf24" />
+            <ModeButton active={pipelineMode === 'classic'} onClick={() => setPipelineMode('classic')} icon="⚡" label="Classic" desc="AST parser · chunked LLM calls" color="#fbbf24" />
             <ModeButton active={pipelineMode === 'agentic'} onClick={() => setPipelineMode('agentic')} icon="🤖" label="Agentic" desc="Multi-agent · deeper analysis" color="#a78bfa" />
           </div>
         </div>
 
-        {/* Provider Selection */}
         <div style={{ marginBottom: '1.5rem' }}>
           <label style={{ display: 'block', fontSize: '.68rem', color: 'var(--text-muted)', letterSpacing: 2, marginBottom: 10, textTransform: 'uppercase' }}>LLM Provider</label>
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 10 }}>
@@ -173,16 +192,15 @@ export default function App() {
         </div>
 
         {provider === 'groq' && <KeyPanel apiKey={apiKey} setApiKey={setApiKey} />}
-        
+
         <div style={{ marginBottom: '1.5rem' }}>
           <label style={{ display: 'block', fontSize: '.68rem', color: 'var(--text-muted)', letterSpacing: 2, marginBottom: 8, textTransform: 'uppercase' }}>GitHub Repository URL</label>
-          <input 
-            className="ad-input" 
-            type="url" 
-            value={githubUrl} 
-            onChange={e => setGithubUrl(e.target.value)} 
-            placeholder="https://github.com/username/repository" 
-            style={{ width: '100%', padding: '12px 16px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontFamily: 'var(--font-mono)' }} 
+          <input
+            type="url"
+            value={githubUrl}
+            onChange={e => setGithubUrl(e.target.value)}
+            placeholder="https://github.com/username/repository"
+            style={{ width: '100%', padding: '12px 16px', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 8, color: 'var(--text-primary)', fontFamily: 'monospace' }}
           />
         </div>
 
@@ -190,23 +208,24 @@ export default function App() {
           <ASTToggle useAST={useAST} setUseAST={setUseAST} disabled={loading} />
         )}
 
-        <PipelineSteps 
-          loading={loading} 
-          raw={raw} 
-          messages={messages} 
-          onFetch={fetchRepo} 
-          onBuild={buildInput} 
-          onGenerate={generateDocs} 
+        {/* PipelineSteps uses chunks (truthy check) to enable the Generate button */}
+        <PipelineSteps
+          loading={loading}
+          raw={raw}
+          messages={chunks}
+          onFetch={fetchRepo}
+          onBuild={buildInput}
+          onGenerate={generateDocs}
         />
-        
-        <StatusBar 
-          loading={loading} 
-          message={loadingMsg} 
-          error={error} 
-          mode={mode} 
-          auditSummary={auditSummary} 
+
+        <StatusBar
+          loading={loading}
+          message={loadingMsg}
+          error={error}
+          mode={mode}
+          auditSummary={auditSummary}
         />
-        
+
         <OutputPanel output={output} tab={tab} setTab={setTab} />
 
         {showSettings && (
@@ -222,13 +241,13 @@ export default function App() {
   )
 }
 
-// --- SUB-COMPONENTS (Styles preserved) ---
+// --- SUB-COMPONENTS ---
 
 function ModeButton({ active, onClick, icon, label, desc, color }) {
   return (
-    <button 
-      onClick={onClick} 
-      style={{ padding: '14px 16px', borderRadius: 8, border: '1px solid', borderColor: active ? color : 'var(--border)', background: active ? `${color}15` : 'var(--bg-surface)', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s' }}
+    <button
+      onClick={onClick}
+      style={{ padding: '14px 16px', borderRadius: 8, border: '1px solid', borderColor: active ? color : 'var(--border)', background: active ? `${color}15` : 'var(--bg-surface)', cursor: 'pointer', textAlign: 'left', transition: 'all 0.2s', width: '100%' }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
         <span>{icon}</span>
@@ -241,9 +260,9 @@ function ModeButton({ active, onClick, icon, label, desc, color }) {
 
 function ProviderButton({ active, onClick, icon, label, color }) {
   return (
-    <button 
-      onClick={onClick} 
-      style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid', borderColor: active ? color : 'var(--border)', background: active ? `${color}15` : 'var(--bg-surface)', cursor: 'pointer', transition: 'all 0.2s' }}
+    <button
+      onClick={onClick}
+      style={{ padding: '12px 16px', borderRadius: 8, border: '1px solid', borderColor: active ? color : 'var(--border)', background: active ? `${color}15` : 'var(--bg-surface)', cursor: 'pointer', transition: 'all 0.2s', width: '100%' }}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span>{icon}</span>
@@ -256,9 +275,9 @@ function ProviderButton({ active, onClick, icon, label, color }) {
 function ASTToggle({ useAST, setUseAST, disabled }) {
   return (
     <div style={{ display: 'flex', alignItems: 'center', gap: 14, padding: '12px 16px', marginBottom: '1.5rem', background: 'var(--bg-surface)', border: '1px solid var(--border)', borderRadius: 8 }}>
-      <button 
-        onClick={() => !disabled && setUseAST(!useAST)} 
-        style={{ width: 40, height: 20, borderRadius: 10, border: 'none', cursor: 'pointer', background: useAST ? 'var(--accent)' : 'var(--bg-elevated)', position: 'relative' }}
+      <button
+        onClick={() => !disabled && setUseAST(!useAST)}
+        style={{ width: 40, height: 20, borderRadius: 10, border: 'none', cursor: 'pointer', background: useAST ? '#22c55e' : 'var(--bg-elevated)', position: 'relative' }}
       >
         <span style={{ position: 'absolute', top: 2, left: 2, width: 16, height: 16, background: '#fff', borderRadius: '50%', transform: useAST ? 'translateX(20px)' : 'translateX(0)', transition: 'transform 0.2s' }} />
       </button>

@@ -1,40 +1,30 @@
 /**
  * scripts/generate-docs-ci.js
  *
- * Runs the Auto-Doc pipeline in CI mode — no Express server needed.
- * Called directly by the GitHub Actions workflow.
- *
- * What it does:
- * 1. Takes the repo URL from environment (the repo being documented)
- * 2. Runs the full pipeline: fetch → sanitize → AST → LLM
- * 3. Writes output as structured markdown files into docs/
+ * Runs the Auto-Doc pipeline in CI mode.
+ * Aligned with AuditLog (PascalCase), Repository (FetchFiles),
+ * and Documentation (#content getter) models.
  */
 
 require('dotenv').config();
-const fs   = require('fs');
+const fs = require('fs');
 const path = require('path');
 
-const githubService   = require('../src/services/github.service');
-const sanitizer       = require('../src/services/sanitizer.service');
-const llmInputBuilder = require('../src/services/llm-input-builder.service');
-const llmService      = require('../src/services/llm.service');
-const auditLog        = require('../src/services/audit-log.service');
+// ── OOP imports ──────────────────────────────────────────────────
+const Repository = require('../src/models/repository.model');
+const sanitizerService = require('../src/services/sanitizer.service');
 
 // ── Config ────────────────────────────────────────────────────────
-const REPO_URL  = process.env.REPO_URL;
+const REPO_URL = process.env.REPO_URL;
+const DOC_MODE = (process.env.DOC_MODE || 'agentic').toLowerCase();
+const PROVIDER = (process.env.DOC_PROVIDER || 'groq').toLowerCase();
 const OUTPUT_DIR = path.join(__dirname, '../docs');
 
 if (!REPO_URL) {
-  console.error(' REPO_URL environment variable is required');
+  console.error('❌ REPO_URL environment variable is required');
   process.exit(1);
 }
 
-if (!process.env.GROQ_API_KEY) {
-  console.error(' GROQ_API_KEY environment variable is required');
-  process.exit(1);
-}
-
-// ── Helpers ───────────────────────────────────────────────────────
 function ensureDir(dir) {
   if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 }
@@ -53,185 +43,162 @@ function timestamp() {
 async function run() {
   console.log('\n🚀 Auto-Doc CI Pipeline starting...');
   console.log(`   Repository: ${REPO_URL}`);
-  console.log(`   Timestamp:  ${timestamp()}\n`);
+  console.log(`   Mode:       ${DOC_MODE}`);
 
   ensureDir(OUTPUT_DIR);
 
-  // ── Step 1: Fetch ──────────────────────────────────────────────
-  console.log('Step 1: Fetching repository...');
-  const rawMarkdown  = await githubService.generateFromUrl(REPO_URL);
-  const safeMarkdown = sanitizer.clean(rawMarkdown);
-  console.log(`   Fetched ${safeMarkdown.length} chars`);
+  // ── Step 1: Fetch repository files ─────────────────────────────
+  const repository = new Repository(REPO_URL);
+  await repository.FetchFiles(); // Octokit-based fetching
 
-  // ── Step 2: Audit ──────────────────────────────────────────────
-  console.log(' Step 2: Running security audit...');
-  const parsed     = llmInputBuilder.parseMarkdown(safeMarkdown);
-  const fileAudits = sanitizer.auditFiles(parsed.files);
-  const totalRedacted = fileAudits.reduce((sum, f) => sum + f.detectedPatterns.length, 0);
-
-  auditLog.log({
-    repository:   parsed.repository,
-    ip:           'ci-runner',
-    mode:         'ast',
-    fileAudits,
-    totalRedacted
-  });
-
-  if (totalRedacted > 0) {
-    console.warn(`     ${totalRedacted} secret(s) detected and redacted`);
-  } else {
-    console.log('    No secrets detected');
+  const files = repository.files;
+  if (!files || files.length === 0) {
+    console.error('❌ No files fetched — check REPO_URL and GITHUB_TOKEN');
+    process.exit(1);
   }
 
-  // ── Step 3: Build LLM input ────────────────────────────────────
-  console.log('🔧 Step 3: Building LLM input (AST mode)...');
-  const llmInput = await llmInputBuilder.build(safeMarkdown, { useAST: true });
-  console.log(`   Mode: ${llmInput.mode}`);
+  // ── Step 2: Security audit ─────────────────────────────────────
+  console.log('🔒 Step 2: Running security audit...');
+  const auditLog = repository.auditLog; 
+  
+  // Clear sanitizer vault for a fresh CI run
+  if (sanitizerService.resetVault) {
+    sanitizerService.resetVault();
+  } else if (sanitizerService.vault) {
+    sanitizerService.vault.clear();
+  }
 
-  // ── Step 4: Generate documentation ────────────────────────────
-  console.log(' Step 4: Calling LLM...');
-  const documentation = await llmService.generate(llmInput.messages);
-  console.log(`   Generated ${documentation.length} chars of documentation`);
+  for (const file of files) {
+    // Aligned with AuditLog.js: IncrementScanned (PascalCase)
+    auditLog.IncrementScanned(); 
+    
+    const content = file.content || '';
+    const findings = sanitizerService.audit(content);
+    
+    if (findings.length > 0) {
+      // Aligned with AuditLog.js: RecordEntry (PascalCase)
+      // Pass the file object so RecordEntry can access file.path
+      auditLog.RecordEntry(file, findings);
+    }
+  }
 
-  // ── Step 5: Write output files ─────────────────────────────────
-  console.log('\n Step 5: Writing documentation files...');
+  // Aligned with AuditLog.js: GetSummary (PascalCase)
+  const auditSummary = auditLog.GetSummary();
 
-  // Main documentation file
-  writeDoc('README.md', buildReadme(parsed.repository, documentation, REPO_URL));
+  if (auditSummary.totalRedacted > 0) {
+    console.warn(`   ⚠️  ${auditSummary.totalRedacted} secrets detected across ${auditSummary.filesAffected} files.`);
+  } else {
+    console.log('   ✅ No secrets detected.');
+  }
 
-  // Index page for GitHub Pages
-  writeDoc('index.html', buildHTMLPage(parsed.repository, documentation));
+  // ── Step 3: Generate documentation ─────────────────────────────
+  console.log(`📝 Step 3: Generating documentation (${DOC_MODE})...`);
+  
+  // repository.GenerateDocumentation internally handles:
+  // 1. Sanitization 2. Chunking/Orchestration 3. Reintegration
+  const docs = await repository.GenerateDocumentation(DOC_MODE, PROVIDER);
 
-  // Audit report
-  writeDoc('SECURITY.md', buildSecurityReport(fileAudits, totalRedacted, parsed.repository));
+  // Aligned with Documentation.js: get content() getter
+  const documentation = docs.content || '';
+  const stats = docs.stats || {};
 
-  // Pipeline metadata
+  // ── Step 4: Write output files ─────────────────────────────────
+  console.log('\n📄 Step 4: Writing documentation files...');
+
+  writeDoc('README.md', buildReadme(repository.name, documentation, REPO_URL));
+  writeDoc('index.html', buildHTMLPage(repository.name, documentation));
+  writeDoc('SECURITY.md', buildSecurityReport(auditSummary, repository.name));
+
   writeDoc('pipeline-meta.json', JSON.stringify({
-    generatedAt:    new Date().toISOString(),
-    repository:     REPO_URL,
-    sourceHash:     process.env.SOURCE_HASH || 'unknown',
-    mode:           llmInput.mode,
-    filesAnalyzed:  parsed.files.length,
-    totalRedacted,
-    groqModel:      'llama-3.1-8b-instant'
+    generatedAt: new Date().toISOString(),
+    repository: REPO_URL,
+    repoName: repository.name,
+    mode: DOC_MODE,
+    provider: PROVIDER,
+    filesAnalyzed: auditSummary.filesScanned,
+    totalRedacted: auditSummary.totalRedacted,
+    stats
   }, null, 2));
 
   console.log('\n🎉 Pipeline complete!');
-  console.log(`   Output: ${OUTPUT_DIR}`);
 }
 
 // ── Document Builders ─────────────────────────────────────────────
 
 function buildReadme(repoName, documentation, repoUrl) {
-  return `#  Auto-Doc — ${repoName}
+  return `# 📚 Documentation: ${repoName}
 
-> Documentation auto-generated by [Auto-Doc](${repoUrl}) on ${timestamp()}
+> Auto-generated by Auto-Doc on ${timestamp()}
+> [View Live Site](https://${repoUrl.split('github.com/')[1].split('/')[0]}.github.io/${repoName}/)
 
 ---
 
 ${documentation}
 
 ---
-
-*Generated with Auto-Doc — secure AI-powered repository documentation*
-`;
+*Powered by Auto-Doc*`;
 }
 
 function buildHTMLPage(repoName, documentation) {
-  // Convert basic markdown to HTML (simple, no dependency)
-  const htmlContent = documentation
-    .replace(/^### (.+)$/gm, '<h3>$1</h3>')
-    .replace(/^## (.+)$/gm,  '<h2>$1</h2>')
-    .replace(/^# (.+)$/gm,   '<h1>$1</h1>')
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    .replace(/`([^`]+)`/g,   '<code>$1</code>')
-    .replace(/\n\n/g,        '</p><p>')
-    .replace(/^- (.+)$/gm,   '<li>$1</li>');
+  // Enhanced MD to HTML conversion
+  const htmlBody = documentation
+    .replace(/^### (.*$)/gim, '<h3 class="text-xl font-bold mt-6 mb-2">$1</h3>')
+    .replace(/^## (.*$)/gim, '<h2 class="text-2xl font-bold mt-8 mb-4 border-b pb-2">$1</h2>')
+    .replace(/^# (.*$)/gim, '<h1 class="text-4xl font-extrabold mb-6">$1</h1>')
+    .replace(/^\- (.*$)/gim, '<li class="ml-4 list-disc">$1</li>')
+    .replace(/\*\*(.*)\*\*/gim, '<strong>$1</strong>')
+    .replace(/`(.*?)`/gim, '<code class="bg-gray-200 px-1 rounded">$1</code>')
+    .replace(/\n/gim, '<br>');
 
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>${repoName} — Auto-Doc</title>
+  <title>${repoName} Docs</title>
   <link href="https://cdn.jsdelivr.net/npm/tailwindcss@2.2.19/dist/tailwind.min.css" rel="stylesheet">
-  <style>
-    body { font-family: 'Inter', sans-serif; }
-    h1 { font-size: 2rem; font-weight: 800; color: #1e293b; margin: 1.5rem 0 1rem; }
-    h2 { font-size: 1.4rem; font-weight: 700; color: #334155; margin: 1.2rem 0 0.6rem; border-bottom: 2px solid #e2e8f0; padding-bottom: 0.3rem; }
-    h3 { font-size: 1.1rem; font-weight: 600; color: #475569; margin: 1rem 0 0.4rem; }
-    code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.875rem; }
-    li  { margin: 0.3rem 0; color: #64748b; }
-    p   { color: #475569; line-height: 1.7; margin: 0.5rem 0; }
-    strong { color: #1e293b; }
-  </style>
 </head>
-<body class="bg-gray-50 text-gray-800">
-
-  <header class="bg-white border-b border-gray-200 px-8 py-5 flex items-center justify-between">
-    <div>
-      <span class="text-xs font-mono text-emerald-600 bg-emerald-50 border border-emerald-200 px-3 py-1 rounded-full">
-        ⚡ Auto-generated by Auto-Doc
-      </span>
-      <h1 class="text-2xl font-bold text-gray-900 mt-2">${repoName}</h1>
-    </div>
-    <div class="text-xs text-gray-400 font-mono">${timestamp()}</div>
-  </header>
-
-  <main class="max-w-4xl mx-auto px-8 py-10">
-    <div class="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
-      <p>${htmlContent}</p>
+<body class="bg-gray-50 text-gray-900 leading-relaxed">
+  <nav class="bg-white border-b px-10 py-4 flex justify-between items-center sticky top-0">
+    <h1 class="font-bold text-lg text-emerald-600">Auto-Doc ⚡</h1>
+    <span class="text-xs text-gray-400 font-mono">${timestamp()}</span>
+  </nav>
+  <main class="max-w-4xl mx-auto my-12 bg-white p-12 rounded-3xl shadow-xl border border-gray-100">
+    <div class="prose max-w-none">
+      ${htmlBody}
     </div>
   </main>
-
-  <footer class="text-center text-xs text-gray-400 py-8 font-mono">
-    Generated by Auto-Doc — secure AI-powered documentation
+  <footer class="text-center pb-12 text-gray-400 text-sm">
+    &copy; ${new Date().getFullYear()} Generated securely by Auto-Doc CI Pipeline
   </footer>
-
 </body>
 </html>`;
 }
 
-function buildSecurityReport(fileAudits, totalRedacted, repoName) {
-  const affected = fileAudits.filter(f => f.detectedPatterns.length > 0);
+function buildSecurityReport(summary, repoName) {
+  const { filesScanned, filesAffected, totalRedacted, findings } = summary;
 
-  const findings = affected.length > 0
-    ? affected.map(f =>
-        `### \`${f.path}\`\n` +
-        `Detected patterns: ${f.detectedPatterns.map(p => `\`${p}\``).join(', ')}\n`
-      ).join('\n')
+  // Uses 'findings' and 'f.file' from AuditLog.js GetSummary()
+  const findingsList = findings && findings.length > 0
+    ? findings.map(f => `### \`${f.file}\`\n- Redacted patterns: ${f.patterns.join(', ')}`).join('\n')
     : '_No sensitive data detected._';
 
-  return `#  Security Audit Report — ${repoName}
-
-Generated: ${timestamp()}
+  return `# 🔒 Security Audit Report: ${repoName}
 
 ## Summary
-
 | Metric | Value |
-|--------|-------|
-| Files scanned | ${fileAudits.length} |
-| Files with findings | ${affected.length} |
-| Total patterns redacted | ${totalRedacted} |
-| Status | ${totalRedacted === 0 ? ' Clean' : ' Issues found and redacted'} |
+|---|---|
+| Files Scanned | ${filesScanned} |
+| Files with Secrets | ${filesAffected} |
+| Total Redactions | ${totalRedacted} |
 
 ## Findings
-
-${findings}
-
-## What was redacted
-
-All detected secrets were replaced with \`[REDACTED_SECRET]\` before being
-sent to the LLM. No sensitive values were exposed to external services.
+${findingsList}
 
 ---
-*This report is auto-generated by Auto-Doc's security pipeline.*
-`;
+*This report confirms that all secrets were anonymized locally before LLM processing.*`;
 }
 
-// ── Run ───────────────────────────────────────────────────────────
 run().catch(err => {
-  console.error('\n Pipeline failed:', err.message);
-  console.error(err.stack);
+  console.error('\n❌ Pipeline failed:', err.message);
   process.exit(1);
 });

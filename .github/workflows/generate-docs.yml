@@ -8,6 +8,7 @@ on:
       - dev
     paths:
       - 'src/**'
+      - 'scripts/**'
       - 'package.json'
       - 'package-lock.json'
 
@@ -17,6 +18,14 @@ on:
         description: 'Force regeneration even if no structural changes'
         required: false
         default: 'false'
+      doc_mode:
+        description: 'Documentation mode: agentic (multi-agent) or classic (AST + LLM chunks)'
+        required: false
+        default: 'agentic'
+        type: choice
+        options:
+          - agentic
+          - classic
 
 permissions:
   contents: write
@@ -42,7 +51,7 @@ jobs:
           cache: 'npm'
 
       - name: Install dependencies
-        run: npm ci
+        run: npm ci --legacy-peer-deps
 
       - name: Semantic diff - detect structural changes
         id: semantic
@@ -55,10 +64,12 @@ jobs:
       - name: Generate documentation
         if: steps.semantic.outputs.skip == 'false'
         env:
-          GROQ_API_KEY: ${{ secrets.GROQ_API_KEY }}
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          REPO_URL:     ${{ github.server_url }}/${{ github.repository }}
-          GROQ_MODEL:   llama-3.3-70b-versatile
+          GROQ_API_KEY:  ${{ secrets.GROQ_API_KEY }}
+          GITHUB_TOKEN:  ${{ secrets.GITHUB_TOKEN }}
+          REPO_URL:      ${{ github.server_url }}/${{ github.repository }}
+          GROQ_MODEL:    llama-3.3-70b-versatile
+          DOC_MODE:      ${{ github.event.inputs.doc_mode || 'agentic' }}
+          DOC_PROVIDER:  groq
         run: node scripts/generate-docs-ci.js
 
       - name: Deploy to GitHub Pages
@@ -73,11 +84,12 @@ jobs:
       - name: Summary
         run: |
           if [ "${{ steps.semantic.outputs.skip }}" = "true" ]; then
-            echo "## Skipped - no structural changes" >> $GITHUB_STEP_SUMMARY
+            echo "## ⏭ Skipped - no structural changes" >> $GITHUB_STEP_SUMMARY
             echo "Only internal logic was modified. Documentation is still up to date." >> $GITHUB_STEP_SUMMARY
             echo "**Changed files:** ${{ steps.semantic.outputs.changed_files }}" >> $GITHUB_STEP_SUMMARY
           else
-            echo "## Documentation generated and deployed" >> $GITHUB_STEP_SUMMARY
+            echo "## ✅ Documentation generated and deployed" >> $GITHUB_STEP_SUMMARY
+            echo "**Mode:** ${{ github.event.inputs.doc_mode || 'agentic' }}" >> $GITHUB_STEP_SUMMARY
             echo "**Structural changes detected in:** ${{ steps.semantic.outputs.changed_files }}" >> $GITHUB_STEP_SUMMARY
             echo "View at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> $GITHUB_STEP_SUMMARY
           fi
