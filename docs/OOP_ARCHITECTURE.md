@@ -1,6 +1,6 @@
 # OOP Architecture & Multi-Agent System
 
-> This document covers all features introduced **after** the original documentation set (ARCHITECTURE.md, WORKFLOW.md, SECURITY.md, CI-CD.md). It documents the Object-Oriented refactoring, the multi-agent AI pipeline, the React frontend, dual LLM provider support, entropy-based detection, and the fingerprint service.
+> This document covers all features introduced **after** the original documentation set (ARCHITECTURE.md, WORKFLOW.md, SECURITY.md, CI-CD.md). It documents the Object-Oriented refactoring, the multi-agent AI pipeline (including `DiagramAgent`), the React frontend, dual LLM provider support, vault-based secret anonymization, entropy detection, and the fingerprint service.
 
 ---
 
@@ -8,11 +8,12 @@
 
 1. [Object-Oriented Domain Models](#1-object-oriented-domain-models)
 2. [MVC Controller Layer](#2-mvc-controller-layer)
+2.5. [API Wire Format](#25-api-wire-format)
 3. [Multi-Agent System](#3-multi-agent-system)
 4. [Agent Communication Protocol](#4-agent-communication-protocol)
 5. [Orchestrator Pipelines](#5-orchestrator-pipelines)
 6. [Fingerprint Service](#6-fingerprint-service)
-7. [Entropy-Based Detection](#7-entropy-based-detection)
+7. [Entropy-Based Detection & Vault Anonymization](#7-entropy-based-detection--vault-anonymization)
 8. [Dual LLM Provider Support](#8-dual-llm-provider-support)
 9. [React Frontend (Client)](#9-react-frontend-client)
 10. [Updated Project Structure](#10-updated-project-structure)
@@ -183,6 +184,56 @@ The sole controller class, exported as a singleton instance. It acts as a thin o
 | `POST` | `/rules` | `addRule` | Adds a custom rule via `User.ManageRules('add', ...)` |
 | `DELETE` | `/rules/:id` | `removeRule` | Removes a custom rule via `User.ManageRules('remove', ...)` |
 | `POST` | `/rules/test` | `testRule` | Tests a regex pattern against sample text using `SanitizationRule` |
+
+---
+
+## 2.5 API Wire Format
+
+### Sentinel Serialization Format
+
+Files are serialized using **sentinel delimiters** (`<<<CONTENT>>>` / `<<<END>>>`) instead of markdown code fences. This prevents silent file drops when content contains triple-backticks, PEM blocks, or other multiline structures.
+
+```
+## File: src/config.js
+<<<CONTENT>>>
+const AWS_KEY = "AKIA1234567890ABCDEF";
+-----BEGIN RSA PRIVATE KEY-----
+MIIEowIBAAKCAQEA...
+-----END RSA PRIVATE KEY-----
+<<<END>>>
+
+## File: package.json
+<<<CONTENT>>>
+{ "name": "my-app", "version": "1.0.0" }
+<<<END>>>
+```
+
+The sentinel strings cannot appear in any real source file, guaranteeing every file parses correctly. This format is used in `fetchRepo` response, `buildInput`, and `GenerateDocumentation`.
+
+### Chunk-Based `buildInput` API
+
+`POST /build` now returns **chunks** instead of a single `messages` array. This supports large repositories that exceed LLM context limits:
+
+```json
+{
+  "step": "build",
+  "chunks": [
+    {
+      "messages": [{ "role": "system", "content": "..." }, { "role": "user", "content": "..." }],
+      "chunkIndex": 0,
+      "totalChunks": 2,
+      "fileCount": 8,
+      "charCount": 18500
+    }
+  ],
+  "totalChunks": 2,
+  "mode": "ast",
+  "vaultSize": 12,
+  "auditSummary": { "filesScanned": 15, "filesAffected": 3, "totalRedacted": 12 }
+}
+```
+
+Each chunk contains a self-contained `messages` array. `POST /generate-docs` iterates over chunks sequentially, generating documentation per-chunk and re-integrating vault tokens after each LLM call. Results are joined with `---` separators.
 
 ---
 
@@ -375,9 +426,30 @@ Selects the optimal documentation template based on the project's nature and log
   "templateId": "FULL_SOFTWARE",
   "requiredSections": ["Overview", "Architecture", "..."],
   "forbiddenSections": ["..."],
-  "reasoning": "Why this template was selected"
+  "reasoning": "Why this template was selected",
+  "diagramType": "CLASS | COMPONENT | PIPELINE | NONE"
 }
 ```
+
+---
+
+### 3.8 `DiagramAgent` — `src/agents/diagram.agent.js`
+
+Generates **Mermaid.js architectural diagrams** (CLASS, COMPONENT, or PIPELINE) using a **two-pass approach** aligned with gitdiagram's technique:
+
+**Pass 1 — Explain:** Reads the file tree + key file snippets and writes a plain-English architecture explanation. This grounds the LLM in real names and structure before drawing.
+
+**Pass 2 — Generate:** Uses the explanation + file tree to produce valid Mermaid syntax. Separating "understand" from "draw" prevents hallucinated or syntactically broken output.
+
+**Diagram Types:**
+
+| Type | Mermaid Syntax | Focus |
+|------|---------------|-------|
+| `CLASS` | `classDiagram` | Classes, methods, inheritance, composition, dependencies |
+| `COMPONENT` | `graph TD` | UI components, state flow, parent-child hierarchy |
+| `PIPELINE` | `flowchart LR` | CI/CD stages, triggers, deployment environments |
+
+**Configuration:** `temperature: 0.1`, `maxTokens: 3000`, `maxRetries: 2`
 
 ---
 
@@ -434,7 +506,7 @@ Two orchestrator implementations coordinate the agent pipeline.
 
 ### 5.1 `OrchestratorAgent` — `src/agents/orchestrator.agent.js`
 
-The **full 5-phase pipeline** with batching, rate limiting, and parallel execution.
+The **full 5-phase pipeline** with batching, rate limiting, and parallel execution. *(Note: `OrchestratorAgent.js` has been replaced by `EnforcedOrchestrator` in the current codebase; this section is kept for historical reference.)*
 
 ```
 Phase 1: Filtrage & Prioritization
@@ -478,25 +550,43 @@ Phase 5: Writer
 
 ### 5.2 `EnforcedOrchestrator` — `src/agents/enforced-orchestrator.agent.js`
 
-A **simplified 4-stage certified pipeline** designed to prevent hallucinated documentation.
+A **certified 7-stage pipeline** designed to prevent hallucinated documentation and generate architectural diagrams.
 
 ```
-Stage 1: RETRIEVER
-    → Select high-signal files (.js, .ts, .py, .json, .md, .tf, .yml)
-    → Skip node_modules, limit to 25 files
+Stage 1: FILE RETRIEVAL
+    → Select high-signal files (.js, .ts, .py, .yml)
+    → Skip node_modules, dist, build, .git
+    → Limit to 25 files, sorted by importance
 
-Stage 2: REPO ANALYZER (anti-hallucination)
+Stage 2: SECURITY GATE
+    → SanitizerService.audit() on each file (regex + entropy)
+    → Files with no findings pass immediately
+    → Flagged files sent to SecurityAgent for semantic review
+    → "do_not_send" files blocked; "redact_and_send" files anonymized
+
+Stage 3: REPO ANALYZER (anti-hallucination)
     → RepoAnalyzerAgent classifies project nature
-    → Extracts ground-truth logic signals
-    → Prevents the writer from inventing features
+    → FingerprintService + ASTParserService for ground-truth signals
+    → Outputs: projectNature, logicSignals, hasExecutableCode
 
-Stage 3: TEMPLATE SELECTOR
-    → TemplateSelectorAgent chooses the documentation schema
-    → Defines required and forbidden sections
+Stage 4: TEMPLATE SELECTOR
+    → TemplateSelectorAgent chooses documentation schema
+    → Defines required/forbidden sections + diagramType (CLASS/COMPONENT/PIPELINE/NONE)
 
-Stage 4: WRITER
-    → WriterAgent generates final documentation
-    → Constrained by the selected template
+Stage 5: DIAGRAM GENERATION (conditional)
+    → Triggered only if diagramType != NONE and hasExecutableCode
+    → DiagramService selects top 8 high-signal files for the diagram type
+    → DiagramAgent runs two-pass explain-then-draw pipeline
+    → Output: valid Mermaid code embedded in documentation
+
+Stage 6: CODE INTELLIGENCE (batched)
+    → CodeIntelligenceAgent on up to 10 safe files
+    → Semantic understanding: purpose, classes, routes, dependencies, complexity
+
+Stage 7: WRITER
+    → WriterAgent generates final markdown documentation
+    → Adapts to project nature, selected template, and diagram output
+    → Sections generated in parallel via Promise.allSettled
 ```
 
 ---
@@ -522,17 +612,33 @@ Stage 4: WRITER
 
 ---
 
-## 7. Entropy-Based Detection
+## 7. Entropy-Based Detection & Vault Anonymization
 
-The `SanitizerService` includes a **Shannon entropy analysis** module (`shannonEntropy()` + `detectHighEntropyStrings()`) that catches high-entropy strings that no regex pattern can match.
+The `SanitizerService` combines **40+ regex patterns** with a **Shannon entropy analysis** pass and a **vault-based token anonymization** pipeline.
 
-### How It Works
+### Vault-Based Anonymization (Key Architectural Shift)
+
+Instead of destructive `[REDACTED_SECRET]` replacement, the sanitizer uses a vault (`Map<token, originalValue>`):
+
+```
+Input:  AWS_KEY=AKIA1234567890ABCDEF
+Output: AWS_KEY=[TOKEN_AWS_KEY_a7b2]
+Vault:  { "[TOKEN_AWS_KEY_a7b2]" → "AKIA1234567890ABCDEF" }
+```
+
+- The LLM receives context-rich tokens it can reason about
+- After generation, `reintegrate(llmOutput)` swaps tokens back locally
+- The vault is cleared between requests via `resetVault()` (session isolation)
+- Identical values in the same session get the same token (deduplication)
+
+### How Entropy Detection Works
 
 1. Splits text into lines
 2. Skips known safe high-entropy patterns (base64 data URIs, git SHA hashes, SHA256 hashes)
 3. Looks for assignment patterns (`key = value` or `key: value`)
 4. Calculates the Shannon entropy of the assigned value
 5. Flags values with **entropy > 4.2** (statistically likely to be secrets or random tokens)
+6. Tokenizes hits the same way as regex matches — they enter the vault
 
 ### Security Report
 
@@ -552,39 +658,13 @@ The `SanitizerService.report()` method produces a structured security report per
     "matchedPatterns": ["api_key", "email", "jwt_token"],
     "highEntropyStrings": [{ "value": "...", "entropy": "4.85", "line": 12 }]
   },
-  "sanitizedContent": "..."
+  "anonymizedContent": "..."
 }
 ```
 
-### Extended Pattern Set (40+ patterns)
+### Full Pattern Set
 
-Beyond the original 21 built-in patterns documented in SECURITY.md, the sanitizer now includes:
-
-| Pattern | What it detects |
-|---------|----------------|
-| `email` | Email addresses |
-| `phone_us` | US phone numbers |
-| `phone_intl` | International phone numbers |
-| `ssn` | Social Security Numbers |
-| `credit_card` | Credit card numbers (Visa, MC, AMEX, Discover) |
-| `ip_address` | IPv4 addresses |
-| `ipv6` | IPv6 addresses |
-| `mac_address` | MAC addresses |
-| `iban` | International Bank Account Numbers |
-| `date_of_birth` | Date of birth fields |
-| `passport` | Passport numbers |
-| `national_id` | National ID / CIN numbers |
-| `stripe_key` | Stripe API keys |
-| `twilio_sid` | Twilio Account SIDs |
-| `twilio_token` | Twilio Auth Tokens |
-| `firebase_key` | Firebase server keys |
-| `jwt_token` | JSON Web Tokens |
-| `basic_auth_url` | URLs with embedded credentials |
-| `ssh_private_key` | OpenSSH private keys |
-| `heroku_api_key` | UUID-shaped API keys |
-| `npm_token` | NPM access tokens |
-| `cloudinary_url` | Cloudinary URLs |
-| `sendgrid_key` | SendGrid API keys |
+See [SECURITY.md](SECURITY.md) for the complete list of 40+ built-in patterns, organized by category (secrets, PII, certificates).
 
 ---
 
@@ -682,15 +762,17 @@ safe-file-generator/
 │   │   ├── architecture.agent.js           ← Cross-file architecture synthesis
 │   │   ├── writer.agent.js                 ← Documentation generation
 │   │   ├── repo-analyzer.agent.js          ← Project classification
-│   │   └── template-selector.agent.js      ← Template selection
+│   │   ├── template-selector.agent.js      ← Template selection
+│   │   └── diagram.agent.js                ← Mermaid diagram generation (two-pass) [NEW]
 │   ├── services/
 │   │   ├── github.service.js               ← Octokit GitHub API client
-│   │   ├── sanitizer.service.js            ← Regex + entropy detection (40+ patterns)
+│   │   ├── sanitizer.service.js            ← Vault-based anonymization (40+ patterns + entropy)
 │   │   ├── ast-parser.service.js           ← Regex-based JS/TS/Python parser
-│   │   ├── llm-input-builder.service.js    ← Prompt builder (AST + raw modes)
+│   │   ├── llm-input-builder.service.js    ← Prompt builder (AST + raw modes, chunk-based)
 │   │   ├── llm.service.js                  ← Dual provider: Groq + Ollama
 │   │   ├── audit-log.service.js            ← Legacy in-memory audit trail
 │   │   ├── fingerprint.service.js          ← Project nature detection [NEW]
+│   │   ├── diagram.service.js              ← High-signal file selector for diagrams [NEW]
 │   │   └── rate-limiter.middleware.js       ← Sliding window rate limiter
 │   └── views/
 │       ├── index.ejs                       ← Legacy EJS template
