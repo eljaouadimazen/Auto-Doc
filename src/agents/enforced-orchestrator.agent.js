@@ -28,21 +28,22 @@ class EnforcedOrchestrator extends BaseAgent {
   }
 
   async execute(agentInput) {
-    const { files }  = agentInput.input;
+    const { files, provider } = agentInput.input;
     const repository = agentInput.context.repository;
+    const apiKey = agentInput.context.apiKey || null;
 
     // ── Stage 1: Filter high-signal files ──────────────────────────────
     const contextFiles = this.filterHighSignalFiles(files);
     this.onProgress({ stage: 1, message: `${contextFiles.length} files selected after filtering` });
 
     // ── Stage 2: Security gate ─────────────────────────────────────────
-    const safeFiles = await this.runSecurityGate(contextFiles, agentInput.context);
+    const safeFiles = await this.runSecurityGate(contextFiles, agentInput.context, apiKey);
     this.onProgress({ stage: 2, message: `${safeFiles.length} files cleared security gate` });
 
     // ── Stage 3: Repo Analyzer ─────────────────────────────────────────
     const analyzerInput = protocol.buildInput(
       'Analyze codebase logic and nature',
-      agentInput.context,
+      { ...agentInput.context, apiKey },
       {
         repository,
         files: safeFiles.map(f => ({
@@ -61,7 +62,7 @@ class EnforcedOrchestrator extends BaseAgent {
     // ── Stage 4: Template Selector ──────────────────────────────────────
     const templateInput = protocol.buildInput(
       'Select best documentation template',
-      agentInput.context,
+      { ...agentInput.context, apiKey },
       { projectNature, logicSignals, hasExecutableCode }
     );
     const templateSelection = await this.templateSelector.run(templateInput);
@@ -78,7 +79,7 @@ class EnforcedOrchestrator extends BaseAgent {
       const diagramFiles = diagramService.filterHighSignalFiles(safeFiles, diagramType);
       const diagramInput = protocol.buildInput(
         'Generate architectural visualization',
-        agentInput.context,
+        { ...agentInput.context, apiKey },
         {
           diagramType,
           projectNature,
@@ -97,7 +98,7 @@ class EnforcedOrchestrator extends BaseAgent {
     if (hasExecutableCode) {
       fileAnalyses = await this.runCodeIntelligence(
         safeFiles.slice(0, CODE_INTEL_LIMIT),
-        agentInput.context
+        { ...agentInput.context, apiKey }
       );
       this.onProgress({ stage: 5, message: `Code intelligence done on ${fileAnalyses.length} files` });
     }
@@ -105,7 +106,7 @@ class EnforcedOrchestrator extends BaseAgent {
     // ── Stage 6: Writer ─────────────────────────────────────────────────
     const writerInput = protocol.buildInput(
       'Write final documentation',
-      agentInput.context,
+      { ...agentInput.context, apiKey },
       {
         projectNature,
         docStrategy: templateId,
@@ -139,7 +140,7 @@ class EnforcedOrchestrator extends BaseAgent {
 
   // ── Helper Methods (Must be inside the class) ────────────────────────
 
-  async runSecurityGate(files, context) {
+  async runSecurityGate(files, context, apiKey) {
     const safe    = [];
     const flagged = [];
 
@@ -157,7 +158,7 @@ class EnforcedOrchestrator extends BaseAgent {
         flagged.map(({ file, findings }) => {
           const input = protocol.buildInput(
             'Confirm security findings',
-            context,
+            { ...context, apiKey },
             { path: file.path, content: file.content, regexFindings: findings }
           );
           return this.securityAgent.run(input);
@@ -175,12 +176,12 @@ class EnforcedOrchestrator extends BaseAgent {
     return safe;
   }
 
-  async runCodeIntelligence(files, context) {
+  async runCodeIntelligence(files, context, apiKey) {
     const results = await Promise.allSettled(
       files.map(file => {
         const input = protocol.buildInput(
           'Analyze file structure',
-          context,
+          { ...context, apiKey },
           { path: file.path, content: file.content }
         );
         return this.codeAgent.run(input);

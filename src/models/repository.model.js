@@ -107,7 +107,7 @@ class Repository {
     } catch (err) { return null; }
   }
 
-  async GenerateDocumentation(mode, provider) {
+  async GenerateDocumentation(mode, provider, apiKey = null) {
     const rawFiles = this.#files.map(f => f.toJSON());
 
     // Sanitize all files before any LLM path sees them.
@@ -128,7 +128,7 @@ class Repository {
       const runId = protocol.generateRunId();
       const input = protocol.buildInput(
         `Generate Enforced Documentation for ${this.#name}`,
-        { repository: this.#name, runId },
+        { repository: this.#name, runId, apiKey: provider === 'groq' ? apiKey : null, provider },
         { files: sanitizedFiles, provider }   // sanitized, not raw
       );
 

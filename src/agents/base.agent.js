@@ -18,7 +18,7 @@ class BaseAgent {
    * @param {string} systemPrompt - The agent's role and instructions
    * @param {Object} options
    * @param {number} options.maxRetries   - Max retry attempts (default: 2)
-   * @param {number} options.temperature  - LLM temperature (default: 0.1)
+   * @param {number} options.temperature  - LLM temperature (default:0.1)
    * @param {number} options.maxTokens    - Max output tokens (default: 2048)
    */
   constructor(name, systemPrompt, options = {}) {
@@ -28,13 +28,16 @@ class BaseAgent {
     this.temperature  = options.temperature ?? 0.1;
     this.maxTokens    = options.maxTokens   ?? 2048;
 
-    // Initialize Groq LLM via LangChain
+    // Initialize Groq LLM via LangChain (uses env key as default)
     this.llm = new ChatGroq({
       apiKey:      process.env.GROQ_API_KEY,
       model:       process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
       temperature: this.temperature,
       maxTokens:   this.maxTokens,
     });
+
+    // Per-request API key (set by run() from context)
+    this._currentApiKey = null;
 
     // Initialize LangSmith client for tracing
     this.langsmith = process.env.LANGCHAIN_API_KEY
@@ -56,6 +59,9 @@ class BaseAgent {
   async run(agentInput) {
     const startTime = Date.now();
     let   attempts  = 0;
+
+    // Extract apiKey from context so callLLM/callLLMJSON can use it
+    this._currentApiKey = agentInput.context?.apiKey || null;
 
     console.info(`[${this.name}] Starting — task: ${agentInput.task}`);
 
@@ -108,6 +114,18 @@ class BaseAgent {
       new SystemMessage(this.systemPrompt),
       new HumanMessage(userPrompt)
     ];
+
+    // Use per-request key if provided (for agentic mode with user-supplied key)
+    if (this._currentApiKey && this._currentApiKey.startsWith('gsk_')) {
+      const dynamicLlm = new ChatGroq({
+        apiKey:      this._currentApiKey,
+        model:       process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
+        temperature: this.temperature,
+        maxTokens:   this.maxTokens,
+      });
+      const response = await dynamicLlm.invoke(messages);
+      return response.content;
+    }
 
     const response = await this.llm.invoke(messages);
     return response.content;
