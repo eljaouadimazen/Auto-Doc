@@ -108,9 +108,10 @@ class GeneratorController {
     try {
       const mode     = getMode(req);
       const provider = getProvider(req);
+      const apiKey   = req.headers['x-api-key'] || null;
       const { chunks, messages, files, repoName } = req.body;
 
-      // ── AGENTIC MODE ──────────────────────────────────────────────────────────
+      // ── AGENTIC MODE ──────────────────────────────────────────────────
       if (mode === 'agentic') {
         if (!files || !Array.isArray(files)) {
           return res.status(400).json({
@@ -119,7 +120,7 @@ class GeneratorController {
         }
 
         const repository = Repository.fromDTO(repoName, files);
-        const docs       = await repository.GenerateDocumentation(mode, provider);
+        const docs       = await repository.GenerateDocumentation(mode, provider, apiKey);
 
         return res.json({
           step:          'generate',
@@ -129,10 +130,8 @@ class GeneratorController {
         });
       }
 
-      // ── CLASSIC MODE — chunk iteration ────────────────────────────────────────
-      const apiKey = req.headers['x-api-key'] || null;
-
-      // ── (A) New chunk-based flow — from buildInput ────────────────────────────
+      // ── CLASSIC MODE — chunk iteration ────────────────────────────────
+      // ── (A) New chunk-based flow — from buildInput ────────────────────
       if (chunks && Array.isArray(chunks) && chunks.length > 0) {
         const isValid = chunks.every(
           c => Array.isArray(c.messages) &&
@@ -173,7 +172,7 @@ class GeneratorController {
         });
       }
 
-      // ── (B) Legacy single-messages flow ──────────────────────────────────────
+      // ── (B) Legacy single-messages flow ──────────────────────────────
       // Kept for backwards compatibility. Sanitization cannot be guaranteed here
       // because messages were constructed outside the pipeline.
       if (!messages || !Array.isArray(messages)) {
@@ -207,14 +206,28 @@ class GeneratorController {
 
   // --- KEY VALIDATION ---
   async validateKey(req, res) {
-    try {
-      const user   = getUserContext(req);
-      const result = await user.ValidateKey(llmService);
-      return res.json(result);
-    } catch (err) {
-      res.status(500).json({ valid: false, reason: err.message });
+  try {
+    const provider = getProvider(req);
+
+    // For Ollama (local), no API key needed — always valid
+    if (provider === 'ollama') {
+      return res.json({ valid: true, reason: 'Ollama (local) — no key required' });
     }
+
+    // Extract the API key from the request header directly
+    const apiKey = req.headers['x-api-key'];
+
+    if (!apiKey) {
+      return res.json({ valid: false, reason: 'No API key provided' });
+    }
+
+    const result = await llmService.validateKey(apiKey);
+    return res.json(result);
+
+  } catch (err) {
+    res.status(500).json({ valid: false, reason: err.message });
   }
+}
 
   // --- AUDIT LOGS ---
   getAuditLogs(req, res) {
