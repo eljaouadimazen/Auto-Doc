@@ -6,7 +6,8 @@
   "scripts": {
     "start": "node src/app.js",
     "dev": "fuser -k 3000/tcp || true && nodemon src/app.js",
-    "test": "echo \"Error: no test specified\" && exit 1",
+    "test": "jest --verbose",
+    "test:coverage": "jest --coverage",
     "generate:ci": "node scripts/generate-docs-ci.js"
   },
   "dependencies": {
@@ -15,7 +16,9 @@
     "@google/generative-ai": "^0.24.1",
     "@langchain/community": "^1.1.25",
     "@langchain/core": "^1.1.36",
+    "@langchain/google-genai": "^1.0.3",
     "@langchain/groq": "^1.1.5",
+    "@langchain/openai": "^1.4.5",
     "@octokit/rest": "^19.0.7",
     "@pinecone-database/pinecone": "^7.1.0",
     "axios": "^1.13.5",
@@ -29,6 +32,7 @@
     "undici": "^8.1.0"
   },
   "devDependencies": {
+    "jest": "^30.3.0",
     "nodemon": "^2.0.20"
   }
 }

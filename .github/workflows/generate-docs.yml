@@ -26,6 +26,15 @@ on:
         options:
           - agentic
           - classic
+      doc_provider:
+        description: 'LLM provider'
+        required: false
+        default: 'groq'
+        type: choice
+        options:
+          - groq
+          - gemini
+          - openrouter
 
 permissions:
   contents: write
@@ -64,12 +73,16 @@ jobs:
       - name: Generate documentation
         if: steps.semantic.outputs.skip == 'false'
         env:
-          GROQ_API_KEY:  ${{ secrets.GROQ_API_KEY }}
-          GITHUB_TOKEN:  ${{ secrets.GITHUB_TOKEN }}
-          REPO_URL:      ${{ github.server_url }}/${{ github.repository }}
-          GROQ_MODEL:    llama-3.3-70b-versatile
-          DOC_MODE:      ${{ github.event.inputs.doc_mode || 'agentic' }}
-          DOC_PROVIDER:  groq
+          GROQ_API_KEY:      ${{ secrets.GROQ_API_KEY }}
+          GEMINI_API_KEY:    ${{ secrets.GEMINI_API_KEY }}
+          OPENROUTER_API_KEY: ${{ secrets.OPENROUTER_API_KEY }}
+          GITHUB_TOKEN:      ${{ secrets.GITHUB_TOKEN }}
+          REPO_URL:          ${{ github.server_url }}/${{ github.repository }}
+          GROQ_MODEL:        llama-3.3-70b-versatile
+          GEMINI_MODEL:      gemini-2.0-flash
+          OPENROUTER_MODEL:  meta-llama/llama-3.3-70b-instruct
+          DOC_MODE:          ${{ github.event.inputs.doc_mode || 'agentic' }}
+          DOC_PROVIDER:      ${{ github.event.inputs.doc_provider || 'groq' }}
         run: node scripts/generate-docs-ci.js
 
       - name: Deploy to GitHub Pages
@@ -90,6 +103,7 @@ jobs:
           else
             echo "## ✅ Documentation generated and deployed" >> $GITHUB_STEP_SUMMARY
             echo "**Mode:** ${{ github.event.inputs.doc_mode || 'agentic' }}" >> $GITHUB_STEP_SUMMARY
+            echo "**Provider:** ${{ github.event.inputs.doc_provider || 'groq' }}" >> $GITHUB_STEP_SUMMARY
             echo "**Structural changes detected in:** ${{ steps.semantic.outputs.changed_files }}" >> $GITHUB_STEP_SUMMARY
             echo "View at: https://${{ github.repository_owner }}.github.io/${{ github.event.repository.name }}/" >> $GITHUB_STEP_SUMMARY
           fi

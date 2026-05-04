@@ -3,6 +3,7 @@ const path = require('path');
 const ProjectFile = require('./project-file.model');
 const AuditLog = require('./audit-log.model');
 const Documentation = require('./documentation.model');
+const { sanitizeLog } = require('../services/log-sanitizer');
 
 const EnforcedOrchestrator = require('../agents/enforced-orchestrator.agent');
 const protocol = require('../agents/protocol');
@@ -96,7 +97,7 @@ class Repository {
         }
       }
     } catch (error) {
-      console.error(`Failed to fetch ${currentPath}: ${error.message}`);
+      console.error(`Failed to fetch ${currentPath}: ${sanitizeLog(error.message)}`);
     }
   }
 
@@ -110,55 +111,55 @@ class Repository {
   async GenerateDocumentation(mode, provider, apiKey = null) {
     const rawFiles = this.#files.map(f => f.toJSON());
 
-    // Sanitize all files before any LLM path sees them.
-    // anonymize() populates the vault so reintegrate() can restore values after.
-    sanitizerService.resetVault();
+    // Create an isolated session for this request — no race conditions.
+    const session = sanitizerService.createSession();
+
     const sanitizedFiles = rawFiles.map(f => ({
       ...f,
-      content: sanitizerService.anonymize(f.content)
+      content: session.anonymize(f.content)
     }));
 
     let docContent = '';
     let stats      = {};
 
-    if (mode === 'agentic') {
-      const orchestrator = new EnforcedOrchestrator({
-        onProgress: (p) => console.info(`[Pipeline Stage ${p.stage}]`, p.message)
-      });
-      const runId = protocol.generateRunId();
-      const input = protocol.buildInput(
-        `Generate Enforced Documentation for ${this.#name}`,
-        { repository: this.#name, runId, apiKey: provider === 'groq' ? apiKey : null, provider },
-        { files: sanitizedFiles, provider }   // sanitized, not raw
-      );
+    try {
+      if (mode === 'agentic') {
+        const orchestrator = new EnforcedOrchestrator({
+          onProgress: (p) => console.info(`[Pipeline Stage ${p.stage}]`, p.message),
+          session
+        });
+        const runId = protocol.generateRunId();
+        const input = protocol.buildInput(
+          `Generate Enforced Documentation for ${this.#name}`,
+          { repository: this.#name, runId, apiKey: provider === 'ollama' ? null : apiKey, provider },
+          { files: sanitizedFiles, provider }
+        );
 
-      const output = await orchestrator.run(input);
-      if (output.status === 'failed') throw new Error(output.error || 'Pipeline failed');
+        const output = await orchestrator.run(input);
+        if (output.status === 'failed') throw new Error(output.error || 'Pipeline failed');
 
-      // Reintegrate vault tokens in the orchestrator's output
-      docContent = sanitizerService.reintegrate(output.result.documentation);
-      stats      = output.result.stats || {};
+        docContent = session.reintegrate(output.result.documentation);
+        stats      = output.result.stats || {};
 
-    } else {
-      // FIX: use sentinel format so parseMarkdown() can parse every file,
-      // including those with PEM blocks or other multiline content.
-      // FIX: use result.chunks[0].messages — build() no longer returns result.messages.
-      const rawMarkdown = sanitizedFiles
-        .map(f => `## File: ${f.path}\n<<<CONTENT>>>\n${f.content}\n<<<END>>>`)
-        .join('\n\n');
+      } else {
+        const rawMarkdown = sanitizedFiles
+          .map(f => `## File: ${f.path}\n<<<CONTENT>>>\n${f.content}\n<<<END>>>`)
+          .join('\n\n');
 
-      const result = await llmInputBuilder.build(rawMarkdown, { useAST: true, provider });
+        const result = await llmInputBuilder.build(rawMarkdown, { useAST: true, provider, session });
 
-      // Iterate chunks (usually just one for agentic-classic path)
-      const parts = [];
-      for (const chunk of result.chunks) {
-        const chunkDoc     = await llmService.generate(chunk.messages, null, provider);
-        const reintegrated = sanitizerService.reintegrate(chunkDoc);
-        parts.push(reintegrated);
+        const parts = [];
+        for (const chunk of result.chunks) {
+          const chunkDoc     = await llmService.generate(chunk.messages, null, provider);
+          const reintegrated = session.reintegrate(chunkDoc);
+          parts.push(reintegrated);
+        }
+
+        docContent = parts.join('\n\n---\n\n');
+        stats      = { mode: 'classic', chunksUsed: parts.length };
       }
-
-      docContent = parts.join('\n\n---\n\n');
-      stats      = { mode: 'classic', chunksUsed: parts.length };
+    } finally {
+      session.destroy();
     }
 
     this.#documentation = new Documentation(docContent, stats);

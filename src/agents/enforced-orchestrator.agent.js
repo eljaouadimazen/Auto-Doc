@@ -8,9 +8,8 @@ const TemplateSelectorAgent   = require('./template-selector.agent');
 const CodeIntelligenceAgent   = require('./code-intelligence.agent');
 const SecurityAgent           = require('./security.agent');
 const WriterAgent             = require('./writer.agent');
-const DiagramAgent            = require('./diagram.agent'); 
-const sanitizerService        = require('../services/sanitizer.service');
-const diagramService          = require('../services/diagram.service'); 
+const DiagramAgent            = require('./diagram.agent');
+const diagramService          = require('../services/diagram.service');
 const protocol                = require('./protocol');
 
 const CODE_INTEL_LIMIT = 10;
@@ -23,8 +22,9 @@ class EnforcedOrchestrator extends BaseAgent {
     this.codeAgent        = new CodeIntelligenceAgent();
     this.securityAgent    = new SecurityAgent();
     this.writer           = new WriterAgent();
-    this.diagramAgent     = new DiagramAgent(); 
+    this.diagramAgent     = new DiagramAgent();
     this.onProgress       = options.onProgress || (() => {});
+    this.session          = options.session || null;
   }
 
   async execute(agentInput) {
@@ -143,9 +143,10 @@ class EnforcedOrchestrator extends BaseAgent {
   async runSecurityGate(files, context, apiKey) {
     const safe    = [];
     const flagged = [];
+    const session = this.session;
 
     for (const file of files) {
-      const findings = sanitizerService.audit(file.content || '');
+      const findings = session ? session.audit(file.content || '') : [];
       if (findings.length === 0) {
         safe.push(file);
       } else {

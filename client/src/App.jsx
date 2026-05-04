@@ -33,6 +33,7 @@ function Pipeline() {
   const [repoName, setRepoName] = useState('')
   const [provider, setProvider] = useState('groq')
   const [pipelineMode, setPipelineMode] = useState('agentic')
+  const [sessionId, setSessionId] = useState(null)
 
   const keyTimer = useRef(null)
   const renderedRef = useRef(null)
@@ -66,7 +67,8 @@ function Pipeline() {
 
   // Reset/re-validate when provider changes
   useEffect(() => {
-    if (provider === 'ollama') {
+    const needsKey = provider !== 'ollama'
+    if (!needsKey) {
       setKeyStatus('not set')
       clearTimeout(keyTimer.current)
     } else if (apiKey.trim()) {
@@ -124,6 +126,7 @@ function Pipeline() {
     setOutput('Fetching...')
     setStates({ fetch: false, build: false, generate: false })
     setMessages(null)
+    setSessionId(null)
     setFetchedFiles(null)
     setRepoName('')
 
@@ -167,6 +170,7 @@ function Pipeline() {
 
       setMessages(data.chunks || data.messages)
       setMode(data.mode)
+      setSessionId(data.sessionId || null)
 
       let summary = `✓ BUILD COMPLETE [mode: ${data.mode}]`
       if (data.auditSummary) {
@@ -201,7 +205,7 @@ function Pipeline() {
       if (pipelineMode === 'agentic') {
         body = { files: fetchedFiles, repoName }
       } else if (Array.isArray(messages)) {
-        body = { chunks: messages }
+        body = { chunks: messages, sessionId }
       } else {
         body = { messages }
       }
@@ -228,6 +232,7 @@ function Pipeline() {
   const toggleAST = () => {
     setUseAST(!useAST)
     setMessages(null)
+    setSessionId(null)
     setStates(s => ({ ...s, build: false, generate: false }))
   }
 
@@ -277,18 +282,15 @@ function Pipeline() {
               <div className="settings-row">
                 <div className="setting-group">
                   <label className="setting-label">LLM Provider</label>
-                  <div className="setting-options">
-                    <button
-                      onClick={() => setProvider('groq')}
-                      className={`setting-btn ${provider === 'groq' ? 'setting-btn-active' : ''}`}>
-                      ⚡ Groq
-                    </button>
-                    <button
-                      onClick={() => setProvider('ollama')}
-                      className={`setting-btn ${provider === 'ollama' ? 'setting-btn-active' : ''}`}>
-                      🦙 Ollama
-                    </button>
-                  </div>
+                  <select
+                    value={provider}
+                    onChange={e => setProvider(e.target.value)}
+                    className="provider-select">
+                    <option value="groq">Groq (fast, free tier)</option>
+                    <option value="ollama">Ollama (local, fully free)</option>
+                    <option value="gemini">Gemini (free tier)</option>
+                    <option value="openrouter">OpenRouter (many models)</option>
+                  </select>
                 </div>
                 <div className="setting-group">
                   <label className="setting-label">Pipeline Mode</label>
@@ -313,7 +315,10 @@ function Pipeline() {
               <div className="flex items-center justify-between mb-3">
                 <div className="flex items-center gap-2">
                   <span className="text-sm font-semibold font-mono">
-                    {provider === 'groq' ? '🔑 Groq API Key' : '🦙 Ollama (Local)'}
+                    {provider === 'groq' ? '🔑 Groq API Key'
+                     : provider === 'gemini' ? '🔑 Gemini API Key'
+                     : provider === 'openrouter' ? '🔑 OpenRouter API Key'
+                     : '🦙 Ollama (Local)'}
                   </span>
                   <span className={getKeyBadgeClass()}>
                     {keyStatus}
@@ -323,6 +328,18 @@ function Pipeline() {
                   <a href="https://console.groq.com/keys" target="_blank"
                     className="text-xs text-orange underline font-mono">
                     Get free key ↗
+                  </a>
+                )}
+                {provider === 'gemini' && (
+                  <a href="https://aistudio.google.com/apikey" target="_blank"
+                    className="text-xs text-orange underline font-mono">
+                    Get free key ↗
+                  </a>
+                )}
+                {provider === 'openrouter' && (
+                  <a href="https://openrouter.ai/keys" target="_blank"
+                    className="text-xs text-orange underline font-mono">
+                    Get key ↗
                   </a>
                 )}
                 {provider === 'ollama' && (
@@ -347,7 +364,12 @@ function Pipeline() {
                     setKeyStatus('checking')
                     keyTimer.current = setTimeout(() => validateKey(val), 800)
                   }}
-                  placeholder={provider === 'groq' ? 'gsk_... (pasted directly to Groq, not stored)' : 'Not required for Ollama'}
+                  placeholder={
+                    provider === 'groq' ? 'gsk_... (pasted directly to Groq, not stored)'
+                    : provider === 'gemini' ? 'AIza... (pasted directly to Google, not stored)'
+                    : provider === 'openrouter' ? 'sk-or-... (pasted directly to OpenRouter, not stored)'
+                    : 'Not required for Ollama'
+                  }
                   disabled={provider === 'ollama'}
                   className="flex-1 px-3 py-2 rounded-lg input-field font-mono text-xs"
                 />

@@ -12,6 +12,7 @@ dns.setDefaultResultOrder('ipv4first');
 
 const generatorController = require('./controllers/generator.controller');
 const rateLimiter = require('./services/rate-limiter.middleware');
+const { sanitizeLog } = require('./services/log-sanitizer');
 
 // ── Middleware ────────────────────────────────────────────────────
 app.use(express.json({ limit: '10mb' }));
@@ -53,7 +54,7 @@ app.use((req, res) => {
 
 // ── Error Handler ─────────────────────────────────────────────────
 app.use((err, req, res, next) => {
-  console.error(err.stack);
+  console.error(sanitizeLog(err));
   res.status(500).render('error', { message: 'An unexpected error occurred.' });
 });
 
