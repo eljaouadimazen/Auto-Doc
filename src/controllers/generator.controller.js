@@ -3,7 +3,9 @@ const Repository       = require('../models/repository.model');
 const llmInputBuilder  = require('../services/llm-input-builder.service');
 const llmService       = require('../services/llm.service');
 const sanitizerService = require('../services/sanitizer.service');
+const sessionStore     = require('../services/sanitizer-session-store');
 const SanitizationRule = require('../models/sanitization-rule.model');
+const { sanitizeLog }  = require('../services/log-sanitizer');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -68,7 +70,7 @@ class GeneratorController {
         auditSummary: repository.auditLog.GetSummary()
       });
     } catch (err) {
-      console.error('[fetchRepo]', err.message);
+      console.error('[fetchRepo]', sanitizeLog(err.message));
       res.status(500).json({ error: err.message });
     }
   }
@@ -79,26 +81,28 @@ class GeneratorController {
       const { files, rawMarkdown, useAST } = req.body;
       const provider = getProvider(req);
 
-      // Prefer the rawMarkdown sent by the client (already in sentinel format
-      // from fetchRepo). Fall back to rebuilding it from files if needed.
       const context = rawMarkdown || filesToMarkdown(files || []);
 
       if (!context) {
         return res.status(400).json({ error: 'No content to build from — run Fetch Repo first' });
       }
 
-      const result = await llmInputBuilder.build(context, { useAST, provider });
+      const session = sanitizerService.createSession();
+      const result = await llmInputBuilder.build(context, { useAST, provider, session });
+
+      const sessionId = sessionStore.create(session);
 
       res.json({
         step:         'build',
-        chunks:       result.chunks,       // array of { messages, chunkIndex, totalChunks, fileCount, charCount }
+        chunks:       result.chunks,
         totalChunks:  result.chunks.length,
         mode:         result.mode,
         vaultSize:    result.vaultSize,
-        auditSummary: result.audit         // vault snapshot excluded — server-side only
+        sessionId,
+        auditSummary: result.audit
       });
     } catch (err) {
-      console.error('[buildInput]', err.message);
+      console.error('[buildInput]', sanitizeLog(err.message));
       res.status(500).json({ error: err.message });
     }
   }
@@ -143,38 +147,48 @@ class GeneratorController {
           });
         }
 
-        const chunkResults = [];
+        const sessionId = req.body.sessionId;
+        const session = sessionId ? sessionStore.get(sessionId) : null;
 
-        for (const chunk of chunks) {
-          const chunkDoc     = await llmService.generate(chunk.messages, apiKey, provider);
-          // Swap vault tokens back to real values — runs entirely locally
-          const reintegrated = sanitizerService.reintegrate(chunkDoc);
-          chunkResults.push({
-            chunkIndex: chunk.chunkIndex,
-            content:    reintegrated,
-            fileCount:  chunk.fileCount
+        if (!session) {
+          return res.status(400).json({
+            error: 'Session expired or not found — run Build Input again'
           });
         }
 
-        const documentation = chunkResults.length === 1
-          ? chunkResults[0].content
-          : chunkResults
-              .map((r, i) => i === 0
-                ? r.content
-                : `---\n\n## Continued (files batch ${i + 1})\n\n${r.content}`)
-              .join('\n\n');
+        try {
+          const chunkResults = [];
 
-        return res.json({
-          step:          'generate',
-          documentation,
-          mode:          'classic',
-          chunksUsed:    chunkResults.length
-        });
+          for (const chunk of chunks) {
+            const chunkDoc     = await llmService.generate(chunk.messages, apiKey, provider);
+            const reintegrated = session.reintegrate(chunkDoc);
+            chunkResults.push({
+              chunkIndex: chunk.chunkIndex,
+              content:    reintegrated,
+              fileCount:  chunk.fileCount
+            });
+          }
+
+          const documentation = chunkResults.length === 1
+            ? chunkResults[0].content
+            : chunkResults
+                .map((r, i) => i === 0
+                  ? r.content
+                  : `---\n\n## Continued (files batch ${i + 1})\n\n${r.content}`)
+                .join('\n\n');
+
+          return res.json({
+            step:          'generate',
+            documentation,
+            mode:          'classic',
+            chunksUsed:    chunkResults.length
+          });
+        } finally {
+          sessionStore.destroy(sessionId);
+        }
       }
 
       // ── (B) Legacy single-messages flow ──────────────────────────────
-      // Kept for backwards compatibility. Sanitization cannot be guaranteed here
-      // because messages were constructed outside the pipeline.
       if (!messages || !Array.isArray(messages)) {
         return res.status(400).json({
           error: "Provide either 'chunks' (from Build Input) or a legacy 'messages' array"
@@ -188,18 +202,23 @@ class GeneratorController {
         return res.status(400).json({ error: 'Each message must have { role, content }' });
       }
 
-      const rawDoc        = await llmService.generate(messages, apiKey, provider);
-      const documentation = sanitizerService.reintegrate(rawDoc);
+      const session = sanitizerService.createSession();
+      try {
+        const rawDoc        = await llmService.generate(messages, apiKey, provider);
+        const documentation = session.reintegrate(rawDoc);
 
-      return res.json({
-        step:          'generate',
-        documentation,
-        mode:          'classic',
-        warning:       'Legacy messages path used — run Build Input first for full vault protection.'
-      });
+        return res.json({
+          step:          'generate',
+          documentation,
+          mode:          'classic',
+          warning:       'Legacy messages path used — run Build Input first for full vault protection.'
+        });
+      } finally {
+        session.destroy();
+      }
 
     } catch (err) {
-      console.error('[generateDocs]', err.message);
+      console.error('[generateDocs]', sanitizeLog(err.message));
       res.status(500).json({ error: err.message });
     }
   }
@@ -221,7 +240,7 @@ class GeneratorController {
       return res.json({ valid: false, reason: 'No API key provided' });
     }
 
-    const result = await llmService.validateKey(apiKey);
+    const result = await llmService.validateKey(apiKey, provider);
     return res.json(result);
 
   } catch (err) {

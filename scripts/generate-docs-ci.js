@@ -19,9 +19,15 @@ const REPO_URL = process.env.REPO_URL;
 const DOC_MODE = (process.env.DOC_MODE || 'agentic').toLowerCase();
 const PROVIDER = (process.env.DOC_PROVIDER || 'groq').toLowerCase();
 const OUTPUT_DIR = path.join(__dirname, '../docs');
+const VALID_PROVIDERS = ['groq', 'ollama', 'gemini', 'openrouter'];
 
 if (!REPO_URL) {
   console.error('❌ REPO_URL environment variable is required');
+  process.exit(1);
+}
+
+if (!VALID_PROVIDERS.includes(PROVIDER)) {
+  console.error(`❌ Invalid DOC_PROVIDER "${PROVIDER}". Must be one of: ${VALID_PROVIDERS.join(', ')}`);
   process.exit(1);
 }
 
@@ -44,6 +50,7 @@ async function run() {
   console.log('\n🚀 Auto-Doc CI Pipeline starting...');
   console.log(`   Repository: ${REPO_URL}`);
   console.log(`   Mode:       ${DOC_MODE}`);
+  console.log(`   Provider:   ${PROVIDER}`);
 
   ensureDir(OUTPUT_DIR);
 
@@ -59,25 +66,18 @@ async function run() {
 
   // ── Step 2: Security audit ─────────────────────────────────────
   console.log('🔒 Step 2: Running security audit...');
-  const auditLog = repository.auditLog; 
+  const auditLog = repository.auditLog;
   
-  // Clear sanitizer vault for a fresh CI run
-  if (sanitizerService.resetVault) {
-    sanitizerService.resetVault();
-  } else if (sanitizerService.vault) {
-    sanitizerService.vault.clear();
-  }
+  // Create an isolated session for this CI run
+  const session = sanitizerService.createSession();
 
   for (const file of files) {
-    // Aligned with AuditLog.js: IncrementScanned (PascalCase)
-    auditLog.IncrementScanned(); 
+    auditLog.IncrementScanned();
     
     const content = file.content || '';
-    const findings = sanitizerService.audit(content);
+    const findings = session.audit(content);
     
     if (findings.length > 0) {
-      // Aligned with AuditLog.js: RecordEntry (PascalCase)
-      // Pass the file object so RecordEntry can access file.path
       auditLog.RecordEntry(file, findings);
     }
   }
@@ -90,6 +90,9 @@ async function run() {
   } else {
     console.log('   ✅ No secrets detected.');
   }
+
+  // Destroy audit-only session — GenerateDocumentation creates its own
+  session.destroy();
 
   // ── Step 3: Generate documentation ─────────────────────────────
   console.log(`📝 Step 3: Generating documentation (${DOC_MODE})...`);
