@@ -39,7 +39,9 @@ function buildInput(task, context, input) {
     context: {
       repository: context.repository || 'unknown',
       runId:      context.runId      || generateRunId(),
-      previous:   context.previous   || {}
+      previous:   context.previous   || {},
+      apiKey:     context.apiKey     || null,
+      provider:   context.provider   || 'groq'
     },
     input
   };

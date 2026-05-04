@@ -54,19 +54,19 @@ class LLMInputBuilder {
    * @param   {string} markdownContent   Output of filesToMarkdown() — sentinel format
    * @param   {object} options
    * @param   {boolean} options.useAST   true = AST summaries (default), false = raw
-   * @param   {string}  options.provider 'groq' | 'ollama'
+   * @param   {string}  options.provider 'groq' | 'ollama' | 'gemini' | 'openrouter'
+   * @param   {object}  options.session  Optional SanitizerSession (per-request vault)
    * @returns {{ chunks, mode, audit, vaultSize }}
    */
   async build(markdownContent, options = {}) {
-    const useAST  = options.useAST !== false;
-    const isLocal = options.provider === 'ollama';
-
-    // Reset vault so tokens from a previous request never bleed into this one
-    sanitizerService.resetVault();
+    const useAST   = options.useAST !== false;
+    const provider = options.provider || 'groq';
+    const isLocal  = provider === 'ollama';
+    const session  = options.session || sanitizerService.createSession();
 
     const parsed   = this.parseMarkdown(markdownContent);
     const filtered = this.filterFiles(parsed);
-    const secured  = this.sanitizeFiles(filtered);           // vault populated here
+    const secured  = this.sanitizeFiles(filtered, session);
 
     const prepared = useAST
       ? this.applyASTParsing(secured, isLocal)
@@ -82,14 +82,14 @@ class LLMInputBuilder {
     return {
       chunks:    formatted,
       mode:      useAST ? 'ast' : 'raw',
-      vaultSize: sanitizerService._vault.size,
+      vaultSize: session.vaultSize,
       audit: {
         filesScanned:  secured.files.length,
         filesAffected: secured.auditEntries?.length || 0,
         totalRedacted: secured.auditEntries?.reduce((n, e) => n + e.patterns.length, 0) || 0,
         findings:      secured.auditEntries || []
-        // vault snapshot intentionally NOT returned to client — server-side logs only
-      }
+      },
+      session
     };
   }
 
@@ -149,15 +149,14 @@ class LLMInputBuilder {
 
   // ─── Sanitization + audit ────────────────────────────────────────────────────
 
-  sanitizeFiles(parsed) {
+  sanitizeFiles(parsed, session) {
     const auditEntries = [];
     const files = parsed.files.map(file => {
-      const findings = sanitizerService.audit(file.content);
+      const findings = session.audit(file.content);
       if (findings.length > 0) {
         auditEntries.push({ path: file.path, patterns: findings });
       }
-      // anonymize() stores secrets in vault and replaces with tokens
-      return { ...file, content: sanitizerService.anonymize(file.content) };
+      return { ...file, content: session.anonymize(file.content) };
     });
     return { ...parsed, files, auditEntries };
   }

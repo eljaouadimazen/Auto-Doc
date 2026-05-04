@@ -353,28 +353,28 @@ extractLogicSignals(code) {
 
   const a = file.ast;
   const summary = {
-    file: file.path,
+    file:   file.path,
     nature: a.language,
-    deps: a.imports.map(i => i.specifier || i.module).slice(0, 5),
-    routes: a.expressRoutes,
+    deps:   (a.imports || []).map(i => i.specifier || i.module).filter(Boolean).slice(0, 5),
+    routes: a.expressRoutes || [],          // undefined on Python files
     logic: {
-      classes: a.classes.map(c => ({
-        name: c.name,
-        methods: c.methods.map(m => ({
-          sig: `${m.name}(${m.params.join(',')})`,
-          tags: m.logicSignals,
-          hint: m.preview.slice(0, 100) // Très court !
+      classes: (a.classes || []).map(c => ({
+        name:    c.name,
+        methods: (c.methods || []).map(m => ({
+          sig:  `${m.name}(${(m.params || []).join(',')})`,
+          tags: m.logicSignals || [],       // undefined on Python methods
+          hint: (m.preview || '').slice(0, 100)  // undefined on Python methods
         }))
       })),
-      functions: a.functions.map(f => ({
+      functions: (a.functions || []).map(f => ({
         name: f.name,
-        tags: this.extractLogicSignals(file.content) // Scan simplifié pour fns
+        tags: this.extractLogicSignals(file.content || '')
       }))
     },
-    env: a.envAccess
+    env: a.envAccess || []
   };
 
-  return JSON.stringify(summary); // On renvoie du JSON pur, l'IA préfère ça.
+  return JSON.stringify(summary);
 }
 }
 

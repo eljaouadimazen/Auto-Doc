@@ -4,13 +4,25 @@
  * Base class that every agent extends.
  * Handles: LangSmith tracing, retry logic, structured output parsing,
  * token counting, error wrapping, and protocol compliance.
+ *
+ * Supports multiple LLM providers: groq, ollama, gemini, openrouter
  */
 
 require('dotenv').config();
-const { ChatGroq }          = require('@langchain/groq');
+const { ChatGroq }                    = require('@langchain/groq');
+const { ChatGoogleGenerativeAI }      = require('@langchain/google-genai');
+const { ChatOpenAI }                  = require('@langchain/openai');
 const { HumanMessage, SystemMessage } = require('@langchain/core/messages');
-const { Client }            = require('langsmith');
-const protocol              = require('./protocol');
+const { Client }                      = require('langsmith');
+const protocol                        = require('./protocol');
+const { sanitizeLog }                 = require('../services/log-sanitizer');
+
+const PROVIDER_MODELS = {
+  groq:       process.env.GROQ_MODEL       || 'llama-3.3-70b-versatile',
+  gemini:     process.env.GEMINI_MODEL     || 'gemini-2.0-flash',
+  openrouter: process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct',
+  ollama:     process.env.OLLAMA_MODEL     || 'tinyllama',
+};
 
 class BaseAgent {
   /**
@@ -20,6 +32,7 @@ class BaseAgent {
    * @param {number} options.maxRetries   - Max retry attempts (default: 2)
    * @param {number} options.temperature  - LLM temperature (default:0.1)
    * @param {number} options.maxTokens    - Max output tokens (default: 2048)
+   * @param {string} options.provider     - LLM provider (default: 'groq')
    */
   constructor(name, systemPrompt, options = {}) {
     this.name         = name;
@@ -27,17 +40,14 @@ class BaseAgent {
     this.maxRetries   = options.maxRetries  ?? 2;
     this.temperature  = options.temperature ?? 0.1;
     this.maxTokens    = options.maxTokens   ?? 2048;
+    this.provider     = options.provider    || 'groq';
 
-    // Initialize Groq LLM via LangChain (uses env key as default)
-    this.llm = new ChatGroq({
-      apiKey:      process.env.GROQ_API_KEY,
-      model:       process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
-      temperature: this.temperature,
-      maxTokens:   this.maxTokens,
-    });
+    // Default LLM instance (uses .env keys)
+    this.llm = BaseAgent._createLlm(this.provider, null, this.temperature, this.maxTokens);
 
-    // Per-request API key (set by run() from context)
-    this._currentApiKey = null;
+    // Per-request state (set by run() from context)
+    this._currentApiKey  = null;
+    this._currentProvider = null;
 
     // Initialize LangSmith client for tracing
     this.langsmith = process.env.LANGCHAIN_API_KEY
@@ -46,6 +56,61 @@ class BaseAgent {
 
     if (this.langsmith) {
       console.info(`[${this.name}] LangSmith tracing enabled`);
+    }
+  }
+
+  /**
+   * Factory to create a LangChain chat instance for any provider
+   * @param {string} provider    - 'groq' | 'gemini' | 'openrouter' | 'ollama'
+   * @param {string} apiKey      - Per-request key (null for .env default)
+   * @param {number} temperature - LLM temperature
+   * @param {number} maxTokens   - Max output tokens
+   * @returns {LangChain chat instance}
+   */
+  static _createLlm(provider, apiKey, temperature, maxTokens) {
+    const model = PROVIDER_MODELS[provider] || PROVIDER_MODELS.groq;
+
+    switch (provider) {
+      case 'groq':
+        return new ChatGroq({
+          apiKey:      apiKey || process.env.GROQ_API_KEY,
+          model,
+          temperature,
+          maxTokens,
+        });
+
+      case 'gemini':
+        return new ChatGoogleGenerativeAI({
+          apiKey:      apiKey || process.env.GEMINI_API_KEY,
+          model,
+          temperature,
+          maxOutputTokens: maxTokens,
+        });
+
+      case 'openrouter':
+        return new ChatOpenAI({
+          apiKey:      apiKey || process.env.OPENROUTER_API_KEY,
+          model,
+          temperature,
+          maxTokens,
+          configuration: {
+            baseURL: 'https://openrouter.ai/api/v1',
+          },
+        });
+
+      case 'ollama':
+        return new ChatOpenAI({
+          apiKey:      'ollama',
+          model,
+          temperature,
+          maxTokens,
+          configuration: {
+            baseURL: 'http://localhost:11434/v1',
+          },
+        });
+
+      default:
+        throw new Error(`Unknown LLM provider: ${provider}`);
     }
   }
 
@@ -60,8 +125,9 @@ class BaseAgent {
     const startTime = Date.now();
     let   attempts  = 0;
 
-    // Extract apiKey from context so callLLM/callLLMJSON can use it
-    this._currentApiKey = agentInput.context?.apiKey || null;
+    // Extract apiKey and provider from context
+    this._currentApiKey   = agentInput.context?.apiKey || null;
+    this._currentProvider = agentInput.context?.provider || this.provider;
 
     console.info(`[${this.name}] Starting — task: ${agentInput.task}`);
 
@@ -78,13 +144,13 @@ class BaseAgent {
         return output;
 
       } catch (err) {
-        console.warn(`[${this.name}] Attempt ${attempts} failed: ${err.message}`);
+        console.warn(`[${this.name}] Attempt ${attempts} failed: ${sanitizeLog(err.message)}`);
         if (i === this.maxRetries) {
           const output = protocol.buildFailure(this.name, err, {
             durationMs: Date.now() - startTime,
             attempts
           });
-          console.error(`[${this.name}] All ${attempts} attempts failed`);
+          console.error(`[${this.name}] All ${attempts} attempts failed: ${sanitizeLog(err.message)}`);
           return output;
         }
         // Wait before retrying (exponential backoff)
@@ -115,14 +181,15 @@ class BaseAgent {
       new HumanMessage(userPrompt)
     ];
 
-    // Use per-request key if provided (for agentic mode with user-supplied key)
-    if (this._currentApiKey && this._currentApiKey.startsWith('gsk_')) {
-      const dynamicLlm = new ChatGroq({
-        apiKey:      this._currentApiKey,
-        model:       process.env.GROQ_MODEL || 'llama-3.3-70b-versatile',
-        temperature: this.temperature,
-        maxTokens:   this.maxTokens,
-      });
+    // Use per-request provider/key if set by run()
+    if (this._currentApiKey || this._currentProvider) {
+      const provider = this._currentProvider || this.provider;
+      const dynamicLlm = BaseAgent._createLlm(
+        provider,
+        this._currentApiKey,
+        this.temperature,
+        this.maxTokens
+      );
       const response = await dynamicLlm.invoke(messages);
       return response.content;
     }
