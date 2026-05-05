@@ -1,34 +1,40 @@
-class AuditLog {
-  #timestamp;
-  #filesScanned;
-  #totalRedacted;
-  #entries;
+const auditStore = require('../services/audit-store.service');
+const crypto = require('crypto');
 
-  constructor() {
+class AuditLog {
+  #sessionId;
+  #repoUrl;
+  #timestamp;
+
+  constructor(repoUrl) {
+    this.#sessionId = crypto.randomUUID();
+    this.#repoUrl = repoUrl || 'unknown';
     this.#timestamp = new Date();
-    this.#filesScanned = 0;
-    this.#totalRedacted = 0;
-    this.#entries = [];
+    auditStore.createSession(this.#sessionId, this.#repoUrl);
   }
+
+  get sessionId() { return this.#sessionId; }
 
   RecordEntry(file, findings) {
     if (!findings || findings.length === 0) return;
-    this.#entries.push({ file: file.path, patterns: findings });
-    this.#totalRedacted += findings.length;
+    auditStore.recordEntry(this.#sessionId, file.path, findings);
   }
 
   IncrementScanned() {
-    this.#filesScanned++;
+    auditStore.incrementScanned(this.#sessionId);
   }
 
   GetSummary() {
-    return {
-      timestamp: this.#timestamp.toISOString(),
-      filesScanned: this.#filesScanned,
-      filesAffected: this.#entries.length,
-      totalRedacted: this.#totalRedacted,
-      findings: this.#entries
-    };
+    const summary = auditStore.getSummary(this.#sessionId);
+    if (summary.filesScanned === 0) {
+      summary.timestamp = this.#timestamp.toISOString();
+    }
+    return summary;
+  }
+
+  static GetRecentAudits(limit = 10) {
+    return auditStore.getRecentAudits(limit);
   }
 }
+
 module.exports = AuditLog;

@@ -26,15 +26,18 @@ The vault (`Map<token, originalValue>`) is cleared between requests via `resetVa
 ### Phase 2 — Reintegrate (after LLM)
 After the LLM generates documentation, `reintegrate(llmOutput)` swaps every token back to its original value **locally on the server**. The mapping never leaves the server — the LLM never sees real secrets.
 
+### Per-Request Session Isolation
+
+Each HTTP request creates an isolated `SanitizerSession` via `sanitizerService.createSession()`. The session owns its own vault (`Map<token, originalValue>`). When the request completes, `session.destroy()` clears the vault. This eliminates race conditions between concurrent requests.
+
 ### Key Methods
 
 | Method | Description |
 |--------|-------------|
 | `anonymize(text)` | Scans text, replaces secrets with vault tokens, returns anonymized text |
 | `reintegrate(text)` | Swaps vault tokens back to original values in LLM output |
-| `resetVault()` | Clears the vault between requests (session isolation) |
-| `audit(text)` | Returns list of matched pattern names without modifying text |
-| `detectHighEntropyStrings(text)` | Shannon entropy pass for secrets no regex matched |
+| `session.destroy()` | Clears the vault when a request completes (session isolation) |
+| `resetVault()` | **Deprecated** — no-op, kept for backward compatibility |
 
 ### All detected values are tokenized — never sent raw to any LLM.
 
@@ -42,7 +45,7 @@ After the LLM generates documentation, `reintegrate(llmOutput)` swaps every toke
 
 ## Sensitive Data Detection
 
-### Built-in Detection Patterns (40+ patterns)
+### Built-in Detection Patterns (47 patterns)
 
 #### Secrets & API Keys (21 patterns)
 
@@ -76,7 +79,7 @@ After the LLM generates documentation, `reintegrate(llmOutput)` swaps every toke
 | `firebase_key` | Firebase server keys |
 | `jwt_token` | JSON Web Tokens |
 | `basic_auth_url` | URLs with embedded credentials |
-| `heroku_api_key` | UUID-shaped API keys |
+| `heroku_api_key` | Heroku API keys (requires `HEROKU_API_KEY=` context prefix) |
 | `npm_token` | NPM access tokens |
 | `cloudinary_url` | Cloudinary URLs |
 | `sendgrid_key` | SendGrid API keys |
@@ -85,29 +88,20 @@ After the LLM generates documentation, `reintegrate(llmOutput)` swaps every toke
 
 | Pattern Name | What it detects |
 |---|---|
-| `email` | Email addresses |
+| `email` | Email addresses (word-boundary enforced) |
 | `phone_us` | US phone numbers |
 | `phone_intl` | International phone numbers |
 | `ssn` | Social Security Numbers |
 | `credit_card` | Credit card numbers (Visa, MC, AMEX, Discover) |
-| `ip_address` | IPv4 addresses |
+| `ip_address` | Public IPv4 addresses (excludes private ranges: 10.x, 127.x, 192.168.x, 172.16-31.x) |
 | `ipv6` | IPv6 addresses |
 | `mac_address` | MAC addresses |
 | `iban` | International Bank Account Numbers |
 | `date_of_birth` | Date of birth fields |
-| `passport` | Passport numbers |
+| `passport` | Passport numbers (requires `passport_no`/`passport number` context prefix) |
 | `national_id` | National ID / CIN numbers |
 
 All detected values are replaced with vault tokens (e.g., `[TOKEN_AWS_KEY_a7b2]`). For `.env` patterns, the key name is preserved: `DB_PASSWORD=[TOKEN_DOTENV_VALUE_c3d4]`.
-
-### Shannon Entropy Detection
-
-Beyond regex patterns, a **Shannon entropy analysis** pass catches high-entropy strings that no pattern matches:
-
-1. Splits text into lines, skips known safe contexts (base64 data URIs, git SHAs, SHA-256 hashes)
-2. Extracts assignment values (`key = value` or `key: value`)
-3. Calculates entropy; flags values with **entropy > 4.2** as likely secrets
-4. Tokenizes hits the same way as regex matches
 
 ---
 
@@ -131,30 +125,71 @@ Custom rules are applied alongside built-in patterns in every `clean()` and `aud
 
 ## Audit Trail
 
-Every pipeline run records findings in the per-repository `AuditLog` (owned by the `Repository` aggregate). In OOP mode, audit entries are no longer a global singleton — each repository owns its own audit trail.
+Every pipeline run records findings in the per-repository `AuditLog`, which is backed by **SQLite** (`data/audit-log.db`). Each repository owns its own audit session, eliminating global singleton race conditions.
 
 Each audit entry contains:
-- Timestamp and repository name
+- Session ID (UUID) and repository URL
+- Timestamp (persisted in SQLite)
 - Files scanned and files affected
 - Which pattern types matched (never the actual secret values or vault tokens)
 - Total redaction/tokenization count
 
+**Auto-eviction:** When the database exceeds configured limits (default: 100 sessions, 1000 entries), the oldest records are automatically removed to prevent unbounded growth.
+
 Retrievable via:
 ```http
-GET /audit
+GET /audit?limit=10
 ```
 
-The `SanitizerService` also exposes `getVaultSnapshot()` for debugging — returns a read-only, truncated view of active tokens (values longer than 40 chars are clipped).
+Returns recent audit session summaries. Full findings are available per-session in the `/fetch` and `/build` responses.
+
+---
+
+## Log Sanitization
+
+All `console.error` output is globally sanitized at server startup via a monkey-patch in `app.js`. This ensures that even error paths that forget to call `sanitizeLog()` manually will never leak API keys, secrets, or credentials into server logs or monitoring systems.
+
+Patterns stripped from error output: Groq keys (`gsk_...`), OpenAI keys (`sk-...`), GitHub PATs (`ghp_...`), AWS keys (`AKIA...`), Gemini keys (`AIza...`), Stripe keys, Bearer tokens, database URIs, private keys, and more.
+
+---
+
+## Security Headers
+
+The Express server uses `helmet` middleware to set the following HTTP security headers on every response:
+
+| Header | Value |
+|--------|-------|
+| `Content-Security-Policy` | `default-src 'self'; script-src 'self'; object-src 'none'; frame-src 'none'` |
+| `X-Content-Type-Options` | `nosniff` |
+| `X-Frame-Options` | `SAMEORIGIN` |
+| `Strict-Transport-Security` | `max-age=31536000; includeSubDomains` |
+| `Referrer-Policy` | `no-referrer` |
+
+CORS is configured to allow only `localhost:5173` (Vite dev) and `localhost:3000` by default, configurable via `ALLOWED_ORIGINS` env var.
+
+---
+
+## Per-Endpoint Body Size Limits
+
+Beyond the global 10 MB body limit, individual endpoints enforce stricter caps:
+
+| Endpoint | Max Body |
+|----------|----------|
+| `/rules` POST | 10 KB |
+| `/validate-key` | 100 KB |
+| `/rules/test` | 100 KB |
+| `/fetch`, `/generate-docs` | 2 MB |
+| `/build` | 15 MB |
 
 ---
 
 ## API Key Security
 
-- User-provided API keys (Groq/Ollama) are sent via `x-api-key` header on each request
+- User-provided API keys (Groq/Gemini/OpenRouter) are sent via `x-api-key` header on each request
 - Keys are never stored server-side — not in memory, not in logs
 - For Ollama (local provider), no key is required
-- The server's own Groq key (from `.env`) is used only as fallback
-- Key validation uses Groq's `/v1/models` endpoint — zero tokens consumed
+- The server's own keys (from `.env`) are used only as fallback
+- Key validation uses provider-specific endpoints (`/models` for Groq, `GET /models` for Gemini, `/auth/key` for OpenRouter) — zero tokens consumed
 
 ---
 

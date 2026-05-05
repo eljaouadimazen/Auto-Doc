@@ -37,7 +37,7 @@ class Repository {
 
     this.#files         = [];
     this.#documentation = null;
-    this.#auditLog      = new AuditLog();
+    this.#auditLog      = new AuditLog(this.#url);
 
     this.#octokit = new Octokit({
       auth:    process.env.GITHUB_TOKEN || '',

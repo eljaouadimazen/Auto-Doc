@@ -16,13 +16,7 @@ const { HumanMessage, SystemMessage } = require('@langchain/core/messages');
 const { Client }                      = require('langsmith');
 const protocol                        = require('./protocol');
 const { sanitizeLog }                 = require('../services/log-sanitizer');
-
-const PROVIDER_MODELS = {
-  groq:       process.env.GROQ_MODEL       || 'llama-3.3-70b-versatile',
-  gemini:     process.env.GEMINI_MODEL     || 'gemini-2.0-flash',
-  openrouter: process.env.OPENROUTER_MODEL || 'meta-llama/llama-3.3-70b-instruct',
-  ollama:     process.env.OLLAMA_MODEL     || 'tinyllama',
-};
+const llmProvider                     = require('../services/llm-provider.service');
 
 class BaseAgent {
   /**
@@ -68,7 +62,7 @@ class BaseAgent {
    * @returns {LangChain chat instance}
    */
   static _createLlm(provider, apiKey, temperature, maxTokens) {
-    const model = PROVIDER_MODELS[provider] || PROVIDER_MODELS.groq;
+    const model = llmProvider.getModelName(provider);
 
     switch (provider) {
       case 'groq':
@@ -94,7 +88,7 @@ class BaseAgent {
           temperature,
           maxTokens,
           configuration: {
-            baseURL: 'https://openrouter.ai/api/v1',
+            baseURL: llmProvider.PROVIDER_CONFIG.openrouter.baseUrl,
           },
         });
 
@@ -105,7 +99,7 @@ class BaseAgent {
           temperature,
           maxTokens,
           configuration: {
-            baseURL: 'http://localhost:11434/v1',
+            baseURL: llmProvider.PROVIDER_CONFIG.ollama.baseUrl,
           },
         });
 

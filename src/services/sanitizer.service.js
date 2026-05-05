@@ -17,6 +17,8 @@
 const crypto = require('crypto');
 const SanitizerSession = require('./sanitizer-session');
 
+const MAX_CUSTOM_RULES = parseInt(process.env.MAX_CUSTOM_RULES, 10) || 50;
+
 class SanitizerService {
   constructor() {
     this.builtinPatterns = [
@@ -43,17 +45,17 @@ class SanitizerService {
       { name: 'certificate',      regex: /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g },
       { name: 'dotenv_value',     regex: /^([A-Z][A-Z0-9_]{2,})\s*=\s*["']?([^\s"'\n]{8,})["']?$/gm },
       // PII
-      { name: 'email',            regex: /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g },
+      { name: 'email',            regex: /\b[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}\b/g },
       { name: 'phone_us',         regex: /(\+1[\s\-.]?)?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}/g },
       { name: 'phone_intl',       regex: /\+(?:[0-9][\s\-.]?){6,14}[0-9]/g },
       { name: 'ssn',              regex: /\b(?!000|666|9\d{2})\d{3}[- ]?(?!00)\d{2}[- ]?(?!0000)\d{4}\b/g },
       { name: 'credit_card',      regex: /\b(?:4[0-9]{12}(?:[0-9]{3})?|5[1-5][0-9]{14}|3[47][0-9]{13}|6(?:011|5[0-9]{2})[0-9]{12})\b/g },
-      { name: 'ip_address',       regex: /\b(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g },
+      { name: 'ip_address',       regex: /\b(?!(?:10\.|127\.|192\.168\.|172\.(?:1[6-9]|2\d|3[01])\.|169\.254\.|0\.|255\.))(?:(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\.){3}(?:25[0-5]|2[0-4]\d|[01]?\d\d?)\b/g },
       { name: 'ipv6',             regex: /([0-9a-fA-F]{1,4}:){7}[0-9a-fA-F]{1,4}/g },
       { name: 'mac_address',      regex: /([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}/g },
       { name: 'iban',             regex: /\b[A-Z]{2}[0-9]{2}[A-Z0-9]{4}[0-9]{7}([A-Z0-9]?){0,16}\b/g },
       { name: 'date_of_birth',    regex: /\b(?:dob|date.of.birth|birthdate)\s*[:=]\s*\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/gi },
-      { name: 'passport',         regex: /\b[A-Z]{1,2}[0-9]{6,9}\b/g },
+      { name: 'passport',         regex: /\b(?:passport[_\s]?(?:num|number|id|no)?[\s:=]+)([A-Z]{1,2}[0-9]{6,9})\b/gi },
       { name: 'national_id',      regex: /\b(?:national.id|nid|cin)\s*[:=]\s*[A-Z0-9\-]{6,20}/gi },
       // Additional secrets
       { name: 'stripe_key',       regex: /(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{24,}/g },
@@ -62,14 +64,13 @@ class SanitizerService {
       { name: 'firebase_key',     regex: /AAAA[A-Za-z0-9_\-]{7}:[A-Za-z0-9_\-]{140}/g },
       { name: 'jwt_token',        regex: /eyJ[A-Za-z0-9\-_]+\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_.+/]*/g },
       { name: 'basic_auth_url',   regex: /https?:\/\/[^:]+:[^@]+@[^\s"']+/gi },
-      { name: 'heroku_api_key',   regex: /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g },
+      { name: 'heroku_api_key',   regex: /(?:HEROKU[_\s]?API[_\s]?KEY|heroku[_\s]?key)[_\s:=]+["']?([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})["']?/gi },
       { name: 'npm_token',        regex: /npm_[A-Za-z0-9]{36}/g },
       { name: 'cloudinary_url',   regex: /cloudinary:\/\/[0-9]+:[A-Za-z0-9_\-]+@[a-z0-9]+/g },
       { name: 'sendgrid_key',     regex: /SG\.[A-Za-z0-9\-_]{22}\.[A-Za-z0-9\-_]{43}/g },
     ];
 
-    this.customRules     = [];
-    this._customPatterns = [];
+    this.customRules = [];
   }
 
   // ─── Session factory ─────────────────────────────────────────────────────────
@@ -79,14 +80,16 @@ class SanitizerService {
    * Each request should call this to get its own vault.
    */
   createSession() {
-    const rules = [...this.builtinPatterns, ...this._customPatterns];
+    const customPatterns = this.customRules.map(r => ({ name: r.name, regex: r.regex }));
+    const rules = [...this.builtinPatterns, ...customPatterns];
     return new SanitizerSession(rules);
   }
 
   // ─── Shared getters (for User model, legacy code) ────────────────────────────
 
   getAllPatterns() {
-    return [...this.builtinPatterns, ...this._customPatterns];
+    const customPatterns = this.customRules.map(r => ({ name: r.name, regex: r.regex }));
+    return [...this.builtinPatterns, ...customPatterns];
   }
 
   // ─── Custom rules API (singleton — shared across all sessions) ────────────────
@@ -95,25 +98,28 @@ class SanitizerService {
     try { new RegExp(pattern, flags); }
     catch (e) { throw new Error(`Invalid regex: ${e.message}`); }
 
+    if (this.customRules.length >= MAX_CUSTOM_RULES) {
+      throw new Error(`Maximum custom rules limit reached (${MAX_CUSTOM_RULES}). Remove existing rules before adding new ones.`);
+    }
+
     const rule = {
-      id:      Date.now().toString(36),
+      id:      crypto.randomUUID(),
       name:    name.trim(),
       pattern,
       flags,
+      regex:   new RegExp(pattern, flags),
       addedAt: new Date().toISOString()
     };
 
     this.customRules.push(rule);
-    this._customPatterns.push({ name: rule.name, regex: new RegExp(pattern, flags) });
     console.info(`[sanitizer] Custom rule added: "${rule.name}" (${rule.id})`);
-    return rule;
+    return { id: rule.id, name: rule.name, pattern: rule.pattern, flags: rule.flags, addedAt: rule.addedAt };
   }
 
   removeCustomRule(id) {
     const idx = this.customRules.findIndex(r => r.id === id);
     if (idx === -1) throw new Error(`Rule ${id} not found`);
     this.customRules.splice(idx, 1);
-    this._customPatterns.splice(idx, 1);
     return true;
   }
 

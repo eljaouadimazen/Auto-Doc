@@ -3,12 +3,18 @@ FROM node:22-alpine AS builder
 
 WORKDIR /app
 
+# Install build tools for native modules (better-sqlite3)
+RUN apk add --no-cache python3 make g++
+
 COPY package*.json ./
 
 RUN npm ci --only=production --legacy-peer-deps
 
 # Production stage
 FROM node:22-alpine
+
+# Install SQLite runtime library
+RUN apk add --no-cache sqlite-libs
 
 # Create non-root user for security
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
@@ -20,8 +26,9 @@ COPY --from=builder /app/node_modules ./node_modules
 COPY package*.json ./
 COPY src/ ./src/
 
-# Set ownership to non-root user
-RUN chown -R appuser:appgroup /app
+# Create data directory for SQLite
+RUN mkdir -p data && chown -R appuser:appgroup /app
+
 USER appuser
 
 EXPOSE 3000

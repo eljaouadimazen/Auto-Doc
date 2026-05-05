@@ -51,25 +51,25 @@
 
   ## Pipeline Steps
 
-  ```yaml
-  1. Checkout repository (fetch-depth: 2 for diff comparison)
-  2. Setup Node.js 20 with npm cache
-  3. npm ci
-  4. Semantic diff check → sets skip=true/false output
-  5. Generate documentation (if skip=false)
-     - Runs scripts/generate-docs-ci.js
-     - Uses Repository model to fetch files via Octokit
-     - Runs security audit via AuditLog model + SanitizerService
-     - Mode "agentic": EnforcedOrchestrator runs 7-stage agent pipeline
-     - Mode "classic": LLMInputBuilder chunks → LLMService generates per chunk
-     - Env: GROQ_API_KEY, GITHUB_TOKEN, REPO_URL, GROQ_MODEL, DOC_MODE, DOC_PROVIDER
-  6. Deploy to GitHub Pages (if skip=false)
-     - peaceiris/actions-gh-pages@v3
-     - Publishes docs/ to gh-pages branch
-  7. Pipeline summary
-     - Written to GitHub Actions job summary
-     - Shows mode used, what changed, what was skipped, live URL
-  ```
+   ```yaml
+   1. Checkout repository (fetch-depth: 2 for diff comparison)
+   2. Setup Node.js 22 with npm cache
+   3. npm ci --legacy-peer-deps
+   4. Semantic diff check → sets skip=true/false output
+   5. Generate documentation (if skip=false)
+      - Runs scripts/generate-docs-ci.js
+      - Uses Repository model to fetch files via Octokit
+      - Runs security audit via AuditLog model + SanitizerService
+      - Mode "agentic": EnforcedOrchestrator runs 7-stage agent pipeline
+      - Mode "classic": LLMInputBuilder chunks → LLMService generates per chunk
+      - Env: GROQ_API_KEY, GEMINI_API_KEY, OPENROUTER_API_KEY, GITHUB_TOKEN, REPO_URL, GROQ_MODEL, GEMINI_MODEL, OPENROUTER_MODEL, DOC_MODE, DOC_PROVIDER
+   6. Deploy to GitHub Pages (if skip=false)
+      - peaceiris/actions-gh-pages@v3
+      - Publishes docs/ to gh-pages branch
+   7. Pipeline summary
+      - Written to GitHub Actions job summary
+      - Shows mode used, what changed, what was skipped, live URL
+   ```
 
   ---
 
@@ -147,14 +147,18 @@
 
   ## Environment Variables Required
 
-  | Variable | Where | Description |
-  |----------|-------|-------------|
-  | `GROQ_API_KEY` | GitHub Secrets | Groq API key for LLM generation |
-  | `GITHUB_TOKEN` | Auto-injected | GitHub token for repo access and Pages deployment |
-  | `REPO_URL` | Workflow env | Set automatically from `github.server_url/github.repository` |
-  | `GROQ_MODEL` | Workflow env | Set to `llama-3.3-70b-versatile` |
-  | `DOC_MODE` | Workflow env | `agentic` (default) or `classic` |
-  | `DOC_PROVIDER` | Workflow env | `groq` (default) — LLM provider |
+   | Variable | Where | Description |
+|----------|-------|-------------|
+| `GROQ_API_KEY` | GitHub Secrets | Groq API key for LLM generation |
+| `GEMINI_API_KEY` | GitHub Secrets | Google Gemini API key |
+| `OPENROUTER_API_KEY` | GitHub Secrets | OpenRouter API key |
+| `GITHUB_TOKEN` | Auto-injected | GitHub token for repo access and Pages deployment |
+| `REPO_URL` | Workflow env | Set automatically from `github.server_url/github.repository` |
+| `GROQ_MODEL` | Workflow env | Set to `llama-3.3-70b-versatile` |
+| `GEMINI_MODEL` | Workflow env | Set to `gemini-2.0-flash` |
+| `OPENROUTER_MODEL` | Workflow env | Set to `meta-llama/llama-3.3-70b-instruct` |
+| `DOC_MODE` | Workflow env | `agentic` (default) or `classic` |
+| `DOC_PROVIDER` | Workflow env | `groq` (default), `gemini`, or `openrouter` |
 
   ---
 
@@ -168,4 +172,39 @@
   Branch: gh-pages / root → Save
   ```
 
-  Live documentation URL: `https://<username>.github.io/<repo-name>/`
+   Live documentation URL: `https://<username>.github.io/<repo-name>/`
+
+---
+
+## Docker CI Pipeline (`docker-ci.yml`)
+
+A separate GitHub Actions workflow builds and pushes Docker images for both backend and frontend on every push to `main`, `master`, or `dev`.
+
+### Pipeline Steps
+
+```yaml
+1. Checkout repository
+2. Setup Node.js 22 with npm cache
+3. npm ci --legacy-peer-deps
+4. Lint (ESLint)
+5. npm audit — dependency vulnerability scan
+6. Build Docker image (multi-stage, non-root user)
+7. Push to Docker Hub (sha tag + branch tag + latest)
+8. Trivy vulnerability scanner — CRITICAL/HIGH severity scan
+```
+
+### Security Scanning
+
+- **Trivy** scans the built image for OS and library vulnerabilities
+- Scans for `CRITICAL` and `HIGH` severity issues
+- `--ignore-unfixed` to avoid noise from unpatchable vulnerabilities
+- Results displayed in the GitHub Actions summary table
+- Non-blocking (`exit-code: 0`) — logs findings without failing the build
+
+### Image Tags
+
+| Tag Type | Example | Trigger |
+|----------|---------|---------|
+| SHA | `a3f2c1d` | Every push |
+| Branch | `main`, `dev` | Push to matching branch |
+| Latest | `latest` | Push to default branch |

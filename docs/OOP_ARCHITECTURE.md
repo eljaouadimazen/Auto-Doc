@@ -76,7 +76,7 @@ Represents a fetched GitHub repository. Acts as the **aggregate root** of the do
 
 | Constant | Value | Purpose |
 |----------|-------|---------|
-| `ALLOWED_EXTENSIONS` | `.js`, `.ts`, `.jsx`, `.tsx`, `.py`, `.java`, `.go`, `.rb`, `.json`, `.md`, `.html`, `.css` | Only these file types are fetched |
+| `ALLOWED_EXTENSIONS` | `.js`, `.ts`, `.jsx`, `.tsx`, `.py`, `.java`, `.go`, `.rb`, `.json`, `.md`, `.html`, `.css`, `.env`, `.pem`, `.key`, `.txt`, `.conf`, `.yml`, `.yaml` | Only these file types are fetched |
 | `SKIP_DIRS` | `node_modules`, `dist`, `build`, `.git`, `.github`, `vendor` | Directories skipped during traversal |
 | `MAX_FILE_SIZE` | `100,000` bytes | Files larger than this are ignored |
 
@@ -107,13 +107,22 @@ Represents an individual file within a repository. Encapsulates its own sanitiza
 
 ### 1.4 `AuditLog` — `src/models/audit-log.model.js`
 
-Per-repository security monitoring trail. Each `Repository` instance owns its own `AuditLog`, eliminating the global singleton race conditions.
+Per-repository security monitoring trail with **persistent SQLite storage**. Each `Repository` instance owns its own `AuditLog`, which stores entries in `data/audit-log.db` via `AuditStoreService`. Entries are auto-evicted when the database exceeds configured limits (default: 1000 entries, 100 sessions).
+
+| Member | Visibility | Type | Description |
+|--------|-----------|------|-------------|
+| `#sessionId` | private | `string` | Unique UUID for this audit session |
+| `#repoUrl` | private | `string` | GitHub repository URL |
+| `#timestamp` | private | `Date` | Session creation time |
+
+**Methods:**
 
 | Method | Returns | Description |
 |--------|---------|-------------|
 | `RecordEntry(file, findings)` | `void` | Records a sanitization event (file path + matched pattern names) |
 | `IncrementScanned()` | `void` | Increments the scanned file counter |
 | `GetSummary()` | `Object` | Returns `{ timestamp, filesScanned, filesAffected, totalRedacted, findings }` |
+| `static GetRecentAudits(limit)` | `Object[]` | Returns recent audit session summaries from SQLite |
 
 ---
 
@@ -168,7 +177,7 @@ The sole controller class, exported as a singleton instance. It acts as a thin o
 - A `User` object is constructed per-request from `req.ip` and `req.headers['x-api-key']` via the `getUserContext(req)` factory function.
 - `Repository.fromDTO()` is used to reconstruct domain state across stateless HTTP boundaries for multi-step pipelines.
 - The controller differentiates between `classic` and `agentic` generation modes via the `x-mode` header.
-- The controller differentiates between `groq` and `ollama` providers via the `x-provider` header.
+- The controller differentiates between `groq`, `gemini`, `openrouter`, and `ollama` providers via the `x-provider` header.
 
 **Endpoint Mapping:**
 
@@ -179,7 +188,7 @@ The sole controller class, exported as a singleton instance. It acts as a thin o
 | `POST` | `/generate-docs` | `generateDocs` | Generates documentation (classic or agentic mode) |
 | `POST` | `/generate` | `generate` | Full pipeline in a single request |
 | `POST` | `/validate-key` | `validateKey` | Validates a Groq API key via `User.ValidateKey()` |
-| `GET` | `/audit` | `getAuditLogs` | Returns audit log info (per-repository in OOP mode) |
+| `GET` | `/audit` | `getAuditLogs` | Returns persistent audit history from SQLite (`?limit=N`) |
 | `GET` | `/rules` | `listRules` | Lists all sanitization rules for the current user context |
 | `POST` | `/rules` | `addRule` | Adds a custom rule via `User.ManageRules('add', ...)` |
 | `DELETE` | `/rules/:id` | `removeRule` | Removes a custom rule via `User.ManageRules('remove', ...)` |
@@ -247,7 +256,7 @@ Abstract base class that **every agent extends**. Provides:
 
 | Feature | Implementation |
 |---------|---------------|
-| **LLM Access** | Initializes `ChatGroq` from LangChain with configurable `temperature`, `maxTokens`, and `model` |
+| **LLM Access** | Uses `LLMProviderService` for shared provider config; LangChain `ChatGroq`/`ChatGoogleGenerativeAI`/`ChatOpenAI` for agentic mode |
 | **Retry Logic** | Exponential backoff up to `maxRetries` attempts (default: 2) |
 | **LangSmith Tracing** | Optional observability via `LANGCHAIN_API_KEY` environment variable |
 | **Protocol Compliance** | Wraps results in standardized `AgentOutput` objects via `protocol.buildSuccess()` / `protocol.buildFailure()` |
@@ -668,9 +677,9 @@ See [SECURITY.md](SECURITY.md) for the complete list of 40+ built-in patterns, o
 
 ---
 
-## 8. Dual LLM Provider Support
+## 8. LLM Provider Support
 
-The system supports two LLM providers, selectable per request via the `x-provider` header.
+The system supports **four** LLM providers, selectable per request via the `x-provider` header. Provider configuration is centralized in `src/services/llm-provider.service.js`, shared between the classic pipeline (`llm.service.js`) and the agentic pipeline (`base.agent.js`).
 
 ### 8.1 Groq (Cloud) — Default
 
@@ -680,10 +689,33 @@ The system supports two LLM providers, selectable per request via the `x-provide
 | Default Model | `llama-3.3-70b-versatile` (configurable via `GROQ_MODEL`) |
 | Temperature | 0.2 |
 | Max Tokens | 4096 |
-| Timeout | 30 seconds |
+| Timeout | 120 seconds |
+| Retry | 2 attempts with exponential backoff (1s, 2s) |
 | Error Handling | 401 → Invalid key, 413 → Prompt too large, 429 → Rate limited |
 
-### 8.2 Ollama (Local)
+### 8.2 Gemini (Cloud)
+
+| Configuration | Value |
+|---------------|-------|
+| API Endpoint | Google Generative AI SDK (`GoogleGenerativeAI`) |
+| Default Model | `gemini-1.5-flash` (configurable via `GEMINI_MODEL`) |
+| Temperature | 0.2 |
+| Max Tokens | 4096 |
+| Timeout | SDK default |
+| Retry | 3 attempts, 429-aware with delay extraction from error details |
+
+### 8.3 OpenRouter (Cloud)
+
+| Configuration | Value |
+|---------------|-------|
+| API Endpoint | `https://openrouter.ai/api/v1/chat/completions` |
+| Default Model | `meta-llama/llama-3.3-8b-instruct:free` (configurable via `OPENROUTER_MODEL`) |
+| Temperature | 0.2 |
+| Max Tokens | 4096 |
+| Timeout | 120 seconds |
+| Retry | 2 attempts with exponential backoff (1s, 2s) |
+
+### 8.4 Ollama (Local)
 
 | Configuration | Value |
 |---------------|-------|
@@ -692,6 +724,7 @@ The system supports two LLM providers, selectable per request via the `x-provide
 | Temperature | 0.2 |
 | Max Tokens | 1024 |
 | Timeout | 240 seconds (4 min — local is slower) |
+| Retry | 2 attempts with exponential backoff (1s, 2s) |
 | Error Handling | `ECONNREFUSED` → "Ollama is not running — start it with: `ollama serve`" |
 
 ### Token Budget Adaptation
@@ -742,59 +775,64 @@ client/src/
 ```
 safe-file-generator/
 ├── src/
-│   ├── app.js                              ← Express server entry point
+│   ├── app.js                              ← Express server + helmet + CORS + body limits
 │   ├── controllers/
 │   │   └── generator.controller.js         ← MVC controller (thin orchestrator)
-│   ├── models/                             ← OOP Domain Models [NEW]
+│   ├── models/                             ← OOP Domain Models
 │   │   ├── user.model.js                   ← User aggregate
 │   │   ├── repository.model.js             ← Repository aggregate root
 │   │   ├── project-file.model.js           ← File entity with self-sanitization
-│   │   ├── audit-log.model.js              ← Per-repo audit trail
+│   │   ├── audit-log.model.js              ← Per-repo audit trail (SQLite-backed)
 │   │   ├── sanitization-rule.model.js      ← Regex rule value object
 │   │   └── documentation.model.js          ← Generated doc artifact
-│   ├── agents/                             ← Multi-Agent System [NEW]
-│   │   ├── base.agent.js                   ← Abstract base (LLM, retry, tracing)
+│   ├── agents/                             ← Multi-Agent System
+│   │   ├── base.agent.js                   ← Abstract base (shared provider + retry + tracing)
 │   │   ├── protocol.js                     ← AgentInput/AgentOutput contract
-│   │   ├── orchestrator.agent.js           ← Full 5-phase pipeline
-│   │   ├── enforced-orchestrator.agent.js  ← Certified 4-stage pipeline
+│   │   ├── enforced-orchestrator.agent.js  ← Certified 7-stage pipeline
 │   │   ├── code-intelligence.agent.js      ← LLM-powered code understanding
 │   │   ├── security.agent.js               ← Semantic secret detection
 │   │   ├── architecture.agent.js           ← Cross-file architecture synthesis
 │   │   ├── writer.agent.js                 ← Documentation generation
 │   │   ├── repo-analyzer.agent.js          ← Project classification
 │   │   ├── template-selector.agent.js      ← Template selection
-│   │   └── diagram.agent.js                ← Mermaid diagram generation (two-pass) [NEW]
+│   │   └── diagram.agent.js                ← Mermaid diagram generation (two-pass)
 │   ├── services/
-│   │   ├── github.service.js               ← Octokit GitHub API client
-│   │   ├── sanitizer.service.js            ← Vault-based anonymization (40+ patterns + entropy)
+│   │   ├── sanitizer.service.js            ← Secret detection (47+ patterns, per-session vault)
+│   │   ├── sanitizer-session.js            ← Per-request vault isolation
+│   │   ├── sanitizer-session-store.js      ← Session lifecycle management
+│   │   ├── audit-store.service.js          ← SQLite-persisted audit log [NEW]
+│   │   ├── llm-provider.service.js         ← Shared provider config + retry [NEW]
+│   │   ├── llm.service.js                  ← High-level generate/validate API
 │   │   ├── ast-parser.service.js           ← Regex-based JS/TS/Python parser
 │   │   ├── llm-input-builder.service.js    ← Prompt builder (AST + raw modes, chunk-based)
-│   │   ├── llm.service.js                  ← Dual provider: Groq + Ollama
-│   │   ├── audit-log.service.js            ← Legacy in-memory audit trail
-│   │   ├── fingerprint.service.js          ← Project nature detection [NEW]
-│   │   ├── diagram.service.js              ← High-signal file selector for diagrams [NEW]
-│   │   └── rate-limiter.middleware.js       ← Sliding window rate limiter
+│   │   ├── log-sanitizer.js                ← Global console.error secret stripping [NEW]
+│   │   ├── diagram.service.js              ← High-signal file selector for diagrams
+│   │   └── rate-limiter.middleware.js      ← Sliding window rate limiter
 │   └── views/
 │       ├── index.ejs                       ← Legacy EJS template
 │       └── error.ejs                       ← Error page template
-├── client/                                 ← React Frontend [NEW]
+├── client/                                 ← React Frontend
 │   ├── src/
 │   │   ├── App.jsx
 │   │   ├── main.jsx
 │   │   ├── index.css
 │   │   └── components/ (7 components)
 │   ├── vite.config.js
+│   ├── Dockerfile
+│   ├── nginx.conf.template
+│   ├── entrypoint.sh
 │   └── package.json
+├── Dockerfile                              ← Backend container image
+├── .github/workflows/
+│   ├── generate-docs.yml                   ← Docs CI with semantic diff
+│   └── docker-ci.yml                       ← Docker build + Trivy scanning [NEW]
 ├── scripts/
 │   ├── generate-docs-ci.js                 ← CI headless pipeline runner
 │   └── semantic-diff.js                    ← AST-based smart trigger
 ├── docs/                                   ← Documentation
-│   ├── ARCHITECTURE.md                     ← System layers and data flow
-│   ├── WORKFLOW.md                         ← Step-by-step pipeline description
-│   ├── SECURITY.md                         ← Secret detection model (original)
-│   ├── CI-CD.md                            ← GitHub Actions automation
-│   └── OOP_ARCHITECTURE.md                 ← This document
-└── package.json
+├── data/                                   ← SQLite audit database (gitignored)
+├── SECURITY-THREAT-MODEL.md                ← Threat model with trust boundary diagrams [NEW]
+└── LIMITATIONS.md                          ← Known limitations and trade-offs [NEW]
 ```
 
 ---

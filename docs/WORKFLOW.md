@@ -12,23 +12,24 @@ The web UI exposes the pipeline as 3 explicit steps so users can inspect interme
 Step 1: Fetch & Sanitize
     User pastes GitHub URL → POST /fetch
     ↓
-    github.service fetches all files via Octokit recursively
-    sanitizer.service redacts secrets (double pass)
-    Returns: sanitized markdown blob + preview + size
+    Repository.FetchFiles() fetches all files via Octokit recursively
+    SanitizerService.createSession() → session.anonymize() redacts secrets (regex-based)
+    Returns: sanitized files + preview + size + audit summary
 
 Step 2: Build LLM Input
-    POST /build (with sanitized markdown + useAST flag)
+    POST /build (with sanitized content + useAST flag)
     ↓
-    llm-input-builder parses files from markdown
-    sanitizer.service runs audit → audit-log records findings
-    ast-parser extracts code structure (AST mode) OR truncates (raw mode)
+    LLMInputBuilder parses files from content
+    SanitizerService runs audit → AuditLog records findings
+    ASTParser extracts code structure (AST mode) OR truncates (raw mode)
     Builds structured prompt messages
-    Returns: messages array + audit summary + mode used
+    Returns: chunks array + audit summary + mode used
 
 Step 3: Generate Documentation
-    POST /generate-docs (with messages array)
+    POST /generate-docs (with chunks + sessionId)
     ↓
-    llm.service sends prompt to Groq API (llama-3.3-70b-versatile)
+    LLMService sends prompt to provider (Groq/Gemini/OpenRouter/Ollama via shared LLMProviderService)
+    LLM supports retry with exponential backoff on all providers
     Returns: generated markdown documentation
 ```
 
@@ -56,13 +57,24 @@ Layer 2: Semantic diff (scripts/semantic-diff.js)
     Structural change detected  → GENERATE
 
 Documentation generation (scripts/generate-docs-ci.js)
-    fetch → sanitize → audit → AST build → Groq LLM
+    Repository model → fetch → sanitize → audit → AST build → LLM
+    Provider: Groq/Gemini/OpenRouter (configurable via DOC_PROVIDER)
     Writes to docs/: README.md, index.html, SECURITY.md, pipeline-meta.json
 
 Deploy to GitHub Pages
     peaceiris/actions-gh-pages pushes docs/ to gh-pages branch
     Live at: https://eljaouadimazen.github.io/Auto-Doc/
 ```
+
+### Docker CI Pipeline
+
+Separate workflow (`docker-ci.yml`) runs on every push to `main`, `master`, `dev`:
+
+```
+Git push → Build Docker images (backend + frontend) → Push to Docker Hub → Trivy scan
+```
+
+See [CI-CD.md](CI-CD.md) for details.
 
 ---
 
@@ -94,9 +106,8 @@ Compact summary (5-10 lines)
 ```
 Raw file content
     ↓
-Truncated to MAX_FILE_CHARS (3000) per file
-    Total budget MAX_TOTAL_CHARS (20000)
-    Priority: README → package.json → .ts/.js/.py → other
+Truncated to token budget per file and total
+Priority: README → package.json → .ts/.js/.py → other
     ↓
 Sent as-is in prompt
 ```

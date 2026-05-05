@@ -11,19 +11,21 @@ Auto-Doc uses a three-layer architecture combining local code processing, cloud-
 Runs entirely on the server. No sensitive data leaves this layer unfiltered.
 
 **Responsibilities:**
-- Fetch repository content from GitHub via Octokit REST API
+- Fetch repository content from GitHub via Octokit REST API (encapsulated in `Repository` model)
 - Parse code structure using a custom regex-based AST parser (no ts-morph, no external parser dependency)
-- Detect and redact sensitive data using 20+ built-in regex patterns
+- Detect and redact sensitive data using 47+ built-in regex patterns (context-aware to reduce false positives)
 - Build structured LLM prompts (AST mode or raw mode)
-- Log every sanitization event to the in-memory audit log
+- Log every sanitization event to the persistent SQLite audit log (`data/audit-log.db`)
 
 **Technologies:**
 - Node.js / Express
-- @octokit/rest — GitHub API client
+- @octokit/rest — GitHub API client (encapsulated in `Repository` model)
 - Custom `ASTParserService` — regex-based JS/TS and Python parser
-- Custom `SanitizerService` — secret detection and redaction
+- Custom `SanitizerService` — secret detection and redaction (per-session vault)
 - Custom `LLMInputBuilderService` — prompt construction
-- Custom `AuditLogService` — in-memory audit trail
+- Custom `AuditStoreService` — SQLite-persisted audit trail with auto-eviction
+- Custom `LLMProviderService` — shared provider config (Groq, Gemini, OpenRouter, Ollama)
+- Custom `LogSanitizer` — global console.error secret stripping
 - Custom `RateLimiter` — sliding window rate limiting (no Redis needed)
 
 ---
@@ -37,8 +39,12 @@ Receives only sanitized, structured summaries. Never receives raw secrets.
 - Generate professional documentation using LLM
 
 **Technologies:**
-- Groq API (`llama-3.3-70b-versatile` model)
-- Axios — HTTP client for Groq API calls
+- Groq API (`llama-3.3-70b-versatile`)
+- Google Gemini (`gemini-1.5-flash` / `gemini-2.0-flash`)
+- OpenRouter (`meta-llama/llama-3.3-70b-instruct`)
+- Ollama (local — `tinyllama`)
+- `LLMProviderService` — shared HTTP/SDK client with retry logic
+- `LLMService` — high-level generate/validate API
 
 **Key security property:** The prompt sent to Groq contains only AST summaries (function names, class names, routes, imports, env var names) — never raw file contents with secrets.
 
@@ -49,10 +55,13 @@ Receives only sanitized, structured summaries. Never receives raw secrets.
 **Responsibilities:**
 - Write generated documentation to `docs/` directory
 - Deploy automatically to GitHub Pages via CI/CD
+- Build and push Docker images (backend + frontend) with Trivy vulnerability scanning
 
 **Technologies:**
-- GitHub Actions — automation pipeline
+- GitHub Actions — automation pipeline (`generate-docs.yml`)
 - GitHub Pages — static hosting
+- Docker Hub — container image registry (`docker-ci.yml`)
+- Trivy — container vulnerability scanner
 - `peaceiris/actions-gh-pages` — deployment action
 
 ---
@@ -61,16 +70,20 @@ Receives only sanitized, structured summaries. Never receives raw secrets.
 
 ```
 src/
-├── app.js                          ← Express server, routes, middleware
+├── app.js                          ← Express server, routes, middleware, helmet, CORS
 ├── controllers/
 │   └── generator.controller.js     ← Pipeline orchestration, API key handling
+├── models/                         ← OOP domain models (Repository, User, ProjectFile, ...)
 └── services/
-    ├── github.service.js           ← Octokit repo fetcher
-    ├── sanitizer.service.js        ← Secret detection + redaction
+    ├── sanitizer.service.js        ← Secret detection + redaction (per-session vault)
+    ├── sanitizer-session.js        ← Per-request vault isolation
+    ├── sanitizer-session-store.js  ← Session lifecycle management
+    ├── audit-store.service.js      ← SQLite-persisted audit log with auto-eviction
+    ├── llm-provider.service.js     ← Shared provider config (Groq/Gemini/OpenRouter/Ollama) + retry
+    ├── llm.service.js              ← High-level generate/validate API
     ├── ast-parser.service.js       ← JS/TS/Python AST extraction
     ├── llm-input-builder.service.js ← Prompt builder (AST + raw modes)
-    ├── llm.service.js              ← Groq API client
-    ├── audit-log.service.js        ← In-memory audit trail
+    ├── log-sanitizer.js            ← Global console.error secret stripping
     └── rate-limiter.middleware.js  ← Sliding window rate limiter
 ```
 
@@ -81,17 +94,17 @@ src/
 ```
 GitHub URL
     ↓
-github.service.js         → Fetch repo via Octokit, decode base64 files
+Repository.FetchFiles()     → Fetch repo via Octokit, decode base64 files
     ↓
-sanitizer.service.js      → Redact secrets (20+ patterns), log findings
+SanitizerService.anonymize() → Redact secrets (47+ patterns), vault tokenization
     ↓
-ast-parser.service.js     → Extract classes, functions, routes, imports, env vars
+ASTParserService            → Extract classes, functions, routes, imports, env vars
     ↓
-llm-input-builder.service.js → Build structured prompt (AST or raw mode)
+LLMInputBuilderService      → Build structured prompt (AST or raw mode)
     ↓
-llm.service.js            → POST to Groq API (llama-3.3-70b-versatile)
+LLMService.generate()       → POST to provider API via shared LLMProviderService
     ↓
-Documentation output      → Returned to client or written to docs/
+Documentation output        → Returned to client or written to docs/
 ```
 
 ---
@@ -114,3 +127,14 @@ Files are truncated to a token budget (`MAX_FILE_CHARS = 3000`, `MAX_TOTAL_CHARS
 | `/build` | 20 requests | 15 minutes |
 | `/generate-docs` | 10 requests | 15 minutes |
 | All others | 60 requests | 15 minutes |
+
+## Per-Endpoint Body Size Limits
+
+| Endpoint | Max Body | Reason |
+|----------|----------|--------|
+| `/fetch` | 2 MB | Small GitHub URL payload |
+| `/build` | 15 MB | Large file content |
+| `/generate-docs` | 2 MB | Chunked messages |
+| `/validate-key` | 100 KB | Single API key string |
+| `/rules` POST | 10 KB | Single regex pattern |
+| `/rules/test` | 100 KB | Sample text |

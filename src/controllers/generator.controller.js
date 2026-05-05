@@ -250,15 +250,10 @@ class GeneratorController {
 
   // --- AUDIT LOGS ---
   getAuditLogs(req, res) {
+    const limit = parseInt(req.query.limit, 10) || 10;
+    const AuditLog = require('../models/audit-log.model');
     res.json({
-      logs: [],
-      auditSummary: {
-        filesScanned:  0,
-        filesAffected: 0,
-        totalRedacted: 0,
-        findings:      [],
-        message:       'Audit logs are per-session — read from the fetch or build response.'
-      }
+      logs: AuditLog.GetRecentAudits(limit)
     });
   }
 
