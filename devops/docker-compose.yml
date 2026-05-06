@@ -1,6 +1,8 @@
 services:
   backend:
-    image: mazeneljaouadi/safe-file-generator:latest
+    build:
+      context: ..
+      dockerfile: devops/Dockerfile.backend
     container_name: safe-file-generator-backend
     ports:
       - "3000:3000"
@@ -15,7 +17,9 @@ services:
       start_period: 10s
 
   frontend:
-    image: mazeneljaouadi/safe-file-generator-frontend:latest
+    build:
+      context: ..
+      dockerfile: devops/Dockerfile.frontend
     container_name: safe-file-generator-frontend
     ports:
       - "80:80"
