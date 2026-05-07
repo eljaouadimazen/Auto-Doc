@@ -1,0 +1,12 @@
+services:
+  - type: web
+    name: auto-doc
+    runtime: node
+    plan: free
+    buildCommand: cd client && npm install && npm run build && cd .. && npm install --production
+    startCommand: npm start
+    envVars:
+      - key: NODE_VERSION
+        value: 22
+      - key: GROQ_API_KEY
+        sync: false
