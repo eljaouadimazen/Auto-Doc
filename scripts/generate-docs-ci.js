@@ -6,9 +6,9 @@
  * and Documentation (#content getter) models.
  */
 
-require('dotenv').config();
-const fs = require('fs');
 const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '..', 'devops', '.env') });
+const fs = require('fs');
 
 // ── OOP imports ──────────────────────────────────────────────────
 const Repository = require('../src/models/repository.model');

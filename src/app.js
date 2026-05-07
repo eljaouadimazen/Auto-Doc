@@ -2,7 +2,7 @@ const { setGlobalDispatcher, Agent } = require('undici');
 setGlobalDispatcher(new Agent({ connect: { family: 4 } }));
 
 
-require('dotenv').config();
+require('dotenv').config({ path: require('path').resolve(__dirname, '..', 'devops', '.env') });
 
 const express = require('express');
 const path = require('path');
