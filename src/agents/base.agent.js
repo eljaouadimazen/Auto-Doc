@@ -8,7 +8,8 @@
  * Supports multiple LLM providers: groq, ollama, gemini, openrouter
  */
 
-require('dotenv').config();
+const path = require('path');
+require('dotenv').config({ path: path.resolve(__dirname, '..', '..', 'devops', '.env') });
 const { ChatGroq }                    = require('@langchain/groq');
 const { ChatGoogleGenerativeAI }      = require('@langchain/google-genai');
 const { ChatOpenAI }                  = require('@langchain/openai');
