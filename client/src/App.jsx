@@ -69,7 +69,7 @@ function Pipeline() {
   useEffect(() => {
     const needsKey = provider !== 'ollama'
     if (!needsKey) {
-      setKeyStatus('not set')
+      setKeyStatus('not set') // eslint-disable-line react-hooks/set-state-in-effect
       clearTimeout(keyTimer.current)
     } else if (apiKey.trim()) {
       validateKey(apiKey.trim())

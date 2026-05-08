@@ -1,0 +1,58 @@
+STAGED=$(git diff --cached --name-only --diff-filter=ACMR | grep -v '^node_modules/' || true)
+
+if [ -z "$STAGED" ]; then
+  npx lint-staged
+  exit $?
+fi
+
+echo "$STAGED" | while IFS= read -r file; do
+  [ ! -f "$file" ] && continue
+
+  # ── 1. Trailing whitespace ──────────────────────────────
+  if grep -nI '[[:space:]]$' "$file" 2>/dev/null | grep -v '^Binary'; then
+    echo "✗ Trailing whitespace in $file"
+    exit 1
+  fi
+
+  # ── 2. End-of-file newline ──────────────────────────────
+  if [ -s "$file" ] && [ "$(tail -c 1 "$file" | wc -l)" -eq 0 ]; then
+    echo "✗ $file does not end with a newline"
+    exit 1
+  fi
+
+  # ── 3. Merge conflict markers ───────────────────────────
+  if grep -n '^<<<<<<< \|^=======\|^>>>>>>> ' "$file" >/dev/null 2>&1; then
+    echo "✗ Merge conflict markers in $file"
+    exit 1
+  fi
+
+  # ── 4. Detect private keys ──────────────────────────────
+  if grep -n 'BEGIN \(RSA\|DSA\|EC\|OPENSSH\|PGP\) PRIVATE KEY' "$file" >/dev/null 2>&1; then
+    echo "✗ Private key detected in $file"
+    exit 1
+  fi
+done || exit $?
+
+# ── 5. Check JSON syntax (staged JSON files only) ────────────
+echo "$STAGED" | grep '\.json$' | grep -v 'package-lock.json' | while IFS= read -r file; do
+  [ ! -f "$file" ] && continue
+  node -e "
+    try { JSON.parse(require('fs').readFileSync('$file','utf8')); }
+    catch(e) { console.error('✗ Invalid JSON: $file —', e.message); process.exit(1); }
+  " || exit 1
+done || exit $?
+
+# ── 6. Check YAML syntax (staged YAML files only) ────────────
+echo "$STAGED" | grep -E '\.(yml|yaml)$' | while IFS= read -r file; do
+  [ ! -f "$file" ] && continue
+  node -e "
+    const fs = require('fs');
+    const c = fs.readFileSync('$file','utf8');
+    c.split('\n').forEach((l,i) => {
+      if (/^\t/.test(l)) throw new Error('line '+(i+1)+' uses tabs instead of spaces');
+    });
+  " 2>/dev/null || { echo "✗ YAML issue: $file (prefer spaces over tabs)"; exit 1; }
+done || exit $?
+
+# ── Run staged linter ───────────────────────────────────────
+npx lint-staged
