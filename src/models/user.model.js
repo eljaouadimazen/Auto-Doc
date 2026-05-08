@@ -1,6 +1,6 @@
 const Repository = require('./repository.model');
 const SanitizationRule = require('./sanitization-rule.model');
-const sanitizerService = require('../services/sanitizer.service'); 
+const sanitizerService = require('../services/sanitizer.service');
 
 class User {
   #id;
@@ -12,7 +12,7 @@ class User {
     this.#apiKey = apiKey;
     this.#rules = this._loadGlobalRules();
   }
-  
+
   _loadGlobalRules() {
     // Map standard legacy predefined rules into OOP SanitizationRule objects automatically
     const rules = [];
@@ -31,9 +31,9 @@ class User {
 
   async SubmitRepository(url) {
     const repository = new Repository(url);
-    
+
     await repository.FetchFiles();
-    
+
     // File-by-file logic is completely encapsulated within ProjectFile class instances!
     for (const file of repository.files) {
       repository.auditLog.IncrementScanned();
@@ -42,7 +42,7 @@ class User {
         repository.auditLog.RecordEntry(file, findings);
       }
     }
-    
+
     return repository;
   }
 
@@ -64,7 +64,7 @@ class User {
       return { id: rule.id, name: rule.name, pattern: rule.pattern };
     } else if (action === 'remove') {
       this.#rules = this.#rules.filter(r => r.id !== data.id);
-      try { sanitizerService.removeCustomRule(data.id); } catch(e) {}
+      try { sanitizerService.removeCustomRule(data.id); } catch { /* rule may not exist */ }
       return true;
     }
   }

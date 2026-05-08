@@ -119,8 +119,8 @@ class Repository {
       content: session.anonymize(f.content)
     }));
 
-    let docContent = '';
-    let stats      = {};
+    let docContent;
+    let stats;
 
     try {
       if (mode === 'agentic') {
