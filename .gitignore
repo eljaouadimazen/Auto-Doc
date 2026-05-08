@@ -17,6 +17,9 @@ build/
 # Coverage
 coverage/
 
+# Husky internal
+.husky/_
+
 # OS
 .DS_Store
 Thumbs.db
