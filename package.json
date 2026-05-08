@@ -8,6 +8,10 @@
     "dev": "fuser -k 3000/tcp || true && nodemon src/app.js",
     "test": "jest --verbose",
     "test:coverage": "jest --coverage",
+    "lint": "eslint src/",
+    "lint:client": "cd client && npm run lint",
+    "lint-staged": "lint-staged",
+    "prepare": "husky",
     "generate:ci": "node scripts/generate-docs-ci.js"
   },
   "dependencies": {
@@ -31,8 +35,17 @@
     "simple-git": "^3.15.1",
     "undici": "^8.1.0"
   },
+  "lint-staged": {
+    "src/**/*.js": "eslint --fix",
+    "client/src/**/*.{js,jsx}": "eslint --fix --config client/eslint.config.js"
+  },
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
+    "eslint": "^10.2.1",
+    "globals": "^15.0.0",
+    "husky": "^9.1.7",
     "jest": "^30.3.0",
+    "lint-staged": "^16.4.0",
     "nodemon": "^2.0.20",
     "supertest": "^7.2.2"
   }
