@@ -1,12 +1,24 @@
-  # CI/CD Pipeline
+# CI/CD Pipeline
 
-  ## Overview
+## Overview
 
-  Auto-Doc uses a two-layer smart triggering system built on GitHub Actions. The pipeline only generates documentation when the code structure actually changed — not on every push.
+Auto-Doc uses a two-layer smart triggering system built on GitHub Actions. The pipeline only generates documentation when the code structure actually changed — not on every push.
 
-  The pipeline supports **two documentation modes**:
-  - **Agentic** (default) — Multi-agent orchestrator pipeline with 7 specialized stages: repo analysis, template selection, security gate, code intelligence, diagram generation, and final writing
-  - **Classic** — AST-based structural parsing → chunked LLM calls → merged output
+The pipeline supports **two documentation modes**:
+- **Agentic** (default) — Multi-agent orchestrator pipeline with 7 specialized stages: repo analysis, template selection, security gate, code intelligence, diagram generation, and final writing
+- **Classic** — AST-based structural parsing → chunked LLM calls → merged output
+
+---
+
+## All GitHub Actions Workflows
+
+Three workflow files exist in `.github/workflows/`:
+
+| Workflow File | Purpose |
+|---------------|---------|
+| `generate-docs.yml` | Documentation generation (agentic/classic modes) + GitHub Pages deployment |
+| `ci.yml` | Tests (`npm test`, `npm run test:coverage`), lint, Docker build/scan/push |
+| `deploy.yml` | Deployment automation |
 
   ---
 
@@ -145,16 +157,28 @@
 
   ---
 
-  ## Environment Variables Required
+## Environment Variables Required
 
-  | Variable | Where | Description |
-  |----------|-------|-------------|
-  | `GROQ_API_KEY` | GitHub Secrets | Groq API key for LLM generation |
-  | `GITHUB_TOKEN` | Auto-injected | GitHub token for repo access and Pages deployment |
-  | `REPO_URL` | Workflow env | Set automatically from `github.server_url/github.repository` |
-  | `GROQ_MODEL` | Workflow env | Set to `llama-3.3-70b-versatile` |
-  | `DOC_MODE` | Workflow env | `agentic` (default) or `classic` |
-  | `DOC_PROVIDER` | Workflow env | `groq` (default) — LLM provider |
+**LLM Providers (pick at least one):**
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `GROQ_API_KEY` | Yes* | Groq API key |
+| `GEMINI_API_KEY` | No | Google Gemini API key |
+| `OPENROUTER_API_KEY` | No | OpenRouter API key |
+| `OLLAMA_MODEL` | No | Local Ollama model (no key needed) |
+
+*Groq is the default, but any provider can be used via `DOC_PROVIDER`
+
+**Other Variables:**
+
+| Variable | Where | Description |
+|----------|-------|-------------|
+| `GITHUB_TOKEN` | Auto-injected | GitHub token for repo access and Pages deployment |
+| `REPO_URL` | Workflow env | Set automatically from `github.server_url/github.repository` |
+| `GROQ_MODEL`, `GEMINI_MODEL`, `OPENROUTER_MODEL` | Workflow env | Optional model overrides |
+| `DOC_MODE` | Workflow env | `agentic` (default) or `classic` |
+| `DOC_PROVIDER` | Workflow env | `groq` (default), `ollama`, `gemini`, or `openrouter` |
 
   ---
 

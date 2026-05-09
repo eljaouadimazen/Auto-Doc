@@ -329,43 +329,16 @@ Replaces the regex-based AST parser with **LLM-powered code understanding**. Ins
 
 ---
 
-### 3.4 `ArchitectureAgent` — `src/agents/architecture.agent.js`
+### 3.4 `ArchitectureAgent` — REMOVED
 
-Receives **all** `CodeIntelligenceAgent` results and builds a cross-file architecture map. This agent does NOT analyze individual files — it synthesizes results from all previous agents into a holistic view.
+**Note: `src/agents/architecture.agent.js` does NOT exist in the codebase.**
 
-**Questions it answers:**
-- What are the entry points of this application?
-- How do services depend on each other?
-- What is the data flow from request to response?
-- What architectural patterns were used?
-- What layers exist in this codebase?
+Cross-file architecture synthesis has been absorbed by:
+- `RepoAnalyzerAgent` — Project nature classification
+- `CodeIntelligenceAgent` — Individual file analysis
+- `WriterAgent` — Synthesizes architecture sections during documentation writing
 
-**Output Schema:**
-```json
-{
-  "repository": "repo name",
-  "projectType": "web-api | cli | library | fullstack | microservice | other",
-  "entryPoints": ["main entry files"],
-  "layers": {
-    "presentation": ["..."],
-    "business": ["..."],
-    "data": ["..."],
-    "infrastructure": ["..."]
-  },
-  "serviceMap": [{ "service": "...", "file": "...", "dependsOn": [...], "exposedTo": [...] }],
-  "dataFlow": "Step-by-step request flow",
-  "patterns": ["MVC", "Service Layer", "..."],
-  "apiSurface": { "totalRoutes": 0, "routes": [...] },
-  "externalDependencies": { "llm": [...], "database": [...], "http": [...], "auth": [...], "other": [...] },
-  "environmentConfig": [{ "var": "...", "purpose": "...", "required": true }],
-  "securityPosture": "...",
-  "strengths": ["..."],
-  "gaps": ["..."],
-  "summary": "3-4 sentence overview"
-}
-```
-
-**Configuration:** `temperature: 0.1`, `maxTokens: 2000`, `maxRetries: 2`
+The functionality described above is now distributed across these three agents.
 
 ---
 
@@ -504,47 +477,18 @@ Generates **Mermaid.js architectural diagrams** (CLASS, COMPONENT, or PIPELINE) 
 
 Two orchestrator implementations coordinate the agent pipeline.
 
-### 5.1 `OrchestratorAgent` — `src/agents/orchestrator.agent.js`
+### 5.1 `OrchestratorAgent` — REMOVED
 
-The **full 5-phase pipeline** with batching, rate limiting, and parallel execution. *(Note: `OrchestratorAgent.js` has been replaced by `EnforcedOrchestrator` in the current codebase; this section is kept for historical reference.)*
+**Note: `src/agents/orchestrator.agent.js` does NOT exist in the codebase.**
 
-```
-Phase 1: Filtrage & Prioritization
-    → Filter files (skip node_modules, binaries, empty files)
-    → Sort by importance: app.js → index.js → controllers → services → other
+Only `EnforcedOrchestrator` exists (see Section 5.2). The old 5-phase `OrchestratorAgent` has been completely removed.
 
-Phase 1.5: Fingerprint & Strategy Detection
-    → FingerprintService identifies project nature (backend/frontend/devops)
-    → Detect if project has executable code → choose FULL_ARCH or RESOURCE_ONLY
-
-Phase 2: Security (Parallel)
-    → Run SecurityAgent on ALL eligible files simultaneously
-    → Regex sanitizer runs first, agent confirms and deepens
-    → Files with "do_not_send" recommendation are blocked
-
-Phase 3: Code Intelligence (Batched)
-    → Run CodeIntelligenceAgent on safe files only
-    → Batch size: 3 files per batch (configurable)
-    → Batch delay: 12 seconds between batches (Groq rate limit)
-    → Max files: 15 (configurable)
-
-Phase 4: Architecture
-    → ArchitectureAgent synthesizes all Code Intelligence results
-    → Builds cross-file dependency map, data flow, and patterns
-
-Phase 5: Writer
-    → WriterAgent generates final markdown documentation
-    → Adapts strategy based on project nature and analysis results
-```
-
-**Configuration:**
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `batchSize` | 3 | Files per concurrent LLM batch |
-| `batchDelayMs` | 12000 | Delay between batches (respects Groq rate limits) |
-| `maxFiles` | 15 | Maximum files to analyze |
-| `onProgress` | `() => {}` | Callback for pipeline progress events |
+**Historical Note:** The 5-phase pipeline described below was replaced by the certified 7-stage `EnforcedOrchestrator`:
+- Phase 1-2 (Filter/Security) → Stage 1-2 (File Retrieval + Security Gate)
+- Phase 1.5 (Fingerprint) → Stage 3 (Repo Analyzer)
+- Phase 3 (Code Intelligence) → Stage 6
+- Phase 4 (Architecture) → Absorbed by WriterAgent
+- Phase 5 (Writer) → Stage 7
 
 ---
 
@@ -591,30 +535,33 @@ Stage 7: WRITER
 
 ---
 
-## 6. Fingerprint Service
+## 6. Fingerprint Service — ABSORBED
 
-`src/services/fingerprint.service.js` — Identifies the project nature (Backend, Frontend, DevOps) without hardcoded lists, using a **weighted scoring system**.
+**Note: `src/services/fingerprint.service.js` does NOT exist in the codebase.**
 
-### Signature Definitions
+Project nature classification has been **absorbed into `RepoAnalyzerAgent`** (`src/agents/repo-analyzer.agent.js`). The agent:
+1. Performs structural file/directory pattern matching
+2. Extracts AST logic signals via `ASTParserService`
+3. Calls LLM for final classification
 
-| Nature | Key Files | Key Directories | Weight |
-|--------|-----------|-----------------|--------|
-| **Frontend** | `package.json`, `webpack.config.js`, `tailwind.config.js`, `next.config.js` | `src/components`, `public`, `assets` | 1.0 |
-| **Backend** | `pom.xml`, `build.gradle`, `go.mod`, `composer.json`, `requirements.txt`, `prisma.schema` | `src/main`, `controllers`, `models`, `api`, `routes` | 1.1 |
-| **DevOps** | `main.tf`, `docker-compose.yml`, `Dockerfile`, `Chart.yaml`, `ansible.cfg` | `terraform`, `kubernetes`, `.github/workflows`, `docker` | 1.5 |
+### Classification Logic (in RepoAnalyzerAgent)
 
-### Scoring
-
-- **+5 points** for each critical file match
-- **+2 points** for each directory structure match
-- Scores are multiplied by the nature's **weight** before comparison
-- Returns the winning nature along with confidence level (`high` if score > 0, `low` otherwise)
+| Nature | Key Files | Key Directories |
+|--------|-----------|-----------------|
+| **Frontend** | `package.json`, `webpack.config.js`, `tailwind.config.js`, `next.config.js` | `src/components`, `public`, `assets` |
+| **Backend** | `pom.xml`, `build.gradle`, `go.mod`, `composer.json`, `requirements.txt`, `prisma.schema` | `src/main`, `controllers`, `models`, `api`, `routes` |
+| **DevOps** | `main.tf`, `docker-compose.yml`, `Dockerfile`, `Chart.yaml`, `ansible.cfg` | `terraform`, `kubernetes`, `.github/workflows`, `docker` |
 
 ---
 
 ## 7. Entropy-Based Detection & Vault Anonymization
 
-The `SanitizerService` combines **40+ regex patterns** with a **Shannon entropy analysis** pass and a **vault-based token anonymization** pipeline.
+The sanitization system uses **two tiers**:
+
+1. **`SanitizationRule` model** — Destructive `[REDACTED_SECRET]` replacement (used in `ProjectFile.Sanitize()`)
+2. **`SanitizerSession` service** — Vault-based tokenization (re-integrable, used in HTTP pipeline)
+
+The `SanitizerService` combines **34 built-in regex patterns** with a **Shannon entropy analysis** pass and a **vault-based token anonymization** pipeline via `SanitizerSession`.
 
 ### Vault-Based Anonymization (Key Architectural Shift)
 
@@ -668,9 +615,9 @@ See [SECURITY.md](SECURITY.md) for the complete list of 40+ built-in patterns, o
 
 ---
 
-## 8. Dual LLM Provider Support
+## 8. Quad LLM Provider Support
 
-The system supports two LLM providers, selectable per request via the `x-provider` header.
+The system supports **four** LLM providers, selectable per request via the `x-provider` header.
 
 ### 8.1 Groq (Cloud) — Default
 
@@ -718,22 +665,30 @@ The `client/` directory contains a **React + Vite** single-page application that
 | Vite | Build tool and dev server |
 | JSX | Component templating |
 
-### Component Architecture
+### Component Architecture (FLAT structure)
+
+**Important:** There is NO `components/` directory. All components are inlined as functions within `App.jsx`.
 
 ```
 client/src/
-├── App.jsx              ← Main application component, pipeline orchestration
+├── App.jsx              ← ALL components inlined as functions
 ├── main.jsx             ← React DOM entry point
 ├── index.css            ← Global styles
-└── components/
-    ├── KeyPanel.jsx     ← API key input & validation UI
-    ├── PipelineSteps.jsx ← Visual pipeline progress indicator
-    ├── PipelineState.jsx ← Pipeline state management
-    ├── OutputPanel.jsx  ← Documentation output display
-    ├── AuditPanel.jsx   ← Sanitization audit log viewer
-    ├── RulesPanel.jsx   ← Custom sanitization rules management UI
-    └── StatusBar.jsx    ← Connection status & provider indicator
+├── App.css              ← App-specific styles
+└── assets/              ← Static assets
 ```
+
+### Components in App.jsx
+
+| Component | Purpose |
+|-----------|---------|
+| `KeyPanel` | API key input & validation UI |
+| `PipelineSteps` | Visual pipeline progress indicator |
+| `PipelineState` | Pipeline state management |
+| `OutputPanel` | Documentation output display |
+| `AuditPanel` | Sanitization audit log viewer |
+| `RulesPanel` | Custom sanitization rules management UI |
+| `StatusBar` | Connection status & provider indicator |
 
 ---
 
@@ -745,57 +700,74 @@ safe-file-generator/
 │   ├── app.js                              ← Express server entry point
 │   ├── controllers/
 │   │   └── generator.controller.js         ← MVC controller (thin orchestrator)
-│   ├── models/                             ← OOP Domain Models [NEW]
+│   ├── models/                             ← OOP Domain Models (6 files)
 │   │   ├── user.model.js                   ← User aggregate
-│   │   ├── repository.model.js             ← Repository aggregate root
+│   │   ├── repository.model.js             ← Repository aggregate root (Octokit built-in)
 │   │   ├── project-file.model.js           ← File entity with self-sanitization
-│   │   ├── audit-log.model.js              ← Per-repo audit trail
+│   │   ├── audit-log.model.js              ← Per-repo IN-MEMORY audit trail (NO SQLite)
 │   │   ├── sanitization-rule.model.js      ← Regex rule value object
 │   │   └── documentation.model.js          ← Generated doc artifact
-│   ├── agents/                             ← Multi-Agent System [NEW]
-│   │   ├── base.agent.js                   ← Abstract base (LLM, retry, tracing)
+│   ├── agents/                             ← Multi-Agent System (9 files)
+│   │   ├── base.agent.js                   ← Abstract base (LLM, retry, tracing, 4 providers)
 │   │   ├── protocol.js                     ← AgentInput/AgentOutput contract
-│   │   ├── orchestrator.agent.js           ← Full 5-phase pipeline
-│   │   ├── enforced-orchestrator.agent.js  ← Certified 4-stage pipeline
+│   │   ├── enforced-orchestrator.agent.js  ← ONLY orchestrator (7-stage certified pipeline)
 │   │   ├── code-intelligence.agent.js      ← LLM-powered code understanding
 │   │   ├── security.agent.js               ← Semantic secret detection
-│   │   ├── architecture.agent.js           ← Cross-file architecture synthesis
 │   │   ├── writer.agent.js                 ← Documentation generation
-│   │   ├── repo-analyzer.agent.js          ← Project classification
+│   │   ├── repo-analyzer.agent.js          ← Project classification (absorbed fingerprint)
 │   │   ├── template-selector.agent.js      ← Template selection
-│   │   └── diagram.agent.js                ← Mermaid diagram generation (two-pass) [NEW]
-│   ├── services/
-│   │   ├── github.service.js               ← Octokit GitHub API client
-│   │   ├── sanitizer.service.js            ← Vault-based anonymization (40+ patterns + entropy)
+│   │   └── diagram.agent.js                ← Mermaid diagram generation (two-pass)
+│   ├── services/                           ← Infrastructure Services (9 files)
+│   │   ├── sanitizer.service.js            ← Regex patterns (34 built-in, NOT 40+)
+│   │   ├── sanitizer-session.js            ← Per-request vault tokenization
+│   │   ├── sanitizer-session-store.js      ← Session persistence across HTTP requests
+│   │   ├── log-sanitizer.js                ← Global console.error secret stripping
 │   │   ├── ast-parser.service.js           ← Regex-based JS/TS/Python parser
-│   │   ├── llm-input-builder.service.js    ← Prompt builder (AST + raw modes, chunk-based)
-│   │   ├── llm.service.js                  ← Dual provider: Groq + Ollama
-│   │   ├── audit-log.service.js            ← Legacy in-memory audit trail
-│   │   ├── fingerprint.service.js          ← Project nature detection [NEW]
-│   │   ├── diagram.service.js              ← High-signal file selector for diagrams [NEW]
-│   │   └── rate-limiter.middleware.js       ← Sliding window rate limiter
+│   │   ├── llm-input-builder.service.js    ← Prompt builder (AST + raw modes, chunks)
+│   │   ├── llm.service.js                  ← 4 providers: Groq, Gemini, OpenRouter, Ollama
+│   │   ├── diagram.service.js              ← High-signal file selector for diagrams
+│   │   └── rate-limiter.middleware.js      ← Sliding window rate limiter
 │   └── views/
 │       ├── index.ejs                       ← Legacy EJS template
 │       └── error.ejs                       ← Error page template
-├── client/                                 ← React Frontend [NEW]
+├── client/                                 ← React Frontend (FLAT structure)
 │   ├── src/
-│   │   ├── App.jsx
-│   │   ├── main.jsx
-│   │   ├── index.css
-│   │   └── components/ (7 components)
-│   ├── vite.config.js
+│   │   ├── App.jsx                         ← ALL components inlined as functions
+│   │   ├── main.jsx                        ← Entry point
+│   │   ├── index.css, App.css
+│   │   └── assets/
+│   ├── vite.config.js                      ← outDir: 'public' (relative to client/)
 │   └── package.json
+├── devops/                                 ← Docker + Env config
+│   ├── .env                                ← Environment variables loaded HERE
+│   ├── Dockerfile.backend
+│   ├── Dockerfile.frontend
+│   └── docker-compose.yml
 ├── scripts/
 │   ├── generate-docs-ci.js                 ← CI headless pipeline runner
 │   └── semantic-diff.js                    ← AST-based smart trigger
+├── .github/workflows/
+│   ├── generate-docs.yml                   ← Doc generation pipeline
+│   ├── ci.yml                               ← Tests, lint, Docker build/scan/push
+│   └── deploy.yml                           ← Deployment
 ├── docs/                                   ← Documentation
 │   ├── ARCHITECTURE.md                     ← System layers and data flow
 │   ├── WORKFLOW.md                         ← Step-by-step pipeline description
 │   ├── SECURITY.md                         ← Secret detection model (original)
 │   ├── CI-CD.md                            ← GitHub Actions automation
 │   └── OOP_ARCHITECTURE.md                 ← This document
+├── render.yaml                             ← Render.com deployment config
+├── jest.config.js                          ← Test config (tests DO exist)
+├── .env.example                            ← Example env vars (4 providers)
 └── package.json
 ```
+
+**Files that DO NOT exist (documented incorrectly elsewhere):**
+- `src/services/github.service.js` — GitHub fetching is in `repository.model.js`
+- `src/services/audit-log.service.js` — Audit log is a model, not service
+- `src/services/fingerprint.service.js` — Absorbed by `repo-analyzer.agent.js`
+- `src/agents/orchestrator.agent.js` — Only `enforced-orchestrator.agent.js` exists
+- `src/agents/architecture.agent.js` — Never implemented
 
 ---
 
@@ -860,7 +832,7 @@ safe-file-generator/
 
 ```
 ┌────────────────────────┐
-│       BaseAgent        │ ◄── Abstract (LangChain + Groq + retry + tracing)
+│       BaseAgent        │ ◄── Abstract (LangChain + 4 providers + retry + tracing)
 │────────────────────────│
 │ + run(agentInput)      │
 │ + callLLM(prompt)      │
@@ -870,9 +842,11 @@ safe-file-generator/
          │ extends
     ┌────┴────┬───────────┬───────────────┬──────────────┬────────────────┬──────────────────┐
     ▼         ▼           ▼               ▼              ▼                ▼                  ▼
-Security   CodeIntel   Architecture    Writer     RepoAnalyzer    TemplateSelector    Orchestrators
- Agent      Agent        Agent         Agent       Agent             Agent           (x2 variants)
+ Security   CodeIntel     Writer       RepoAnalyzer   TemplateSelector   DiagramAgent     EnforcedOrchestrator
+  Agent      Agent        Agent          Agent             Agent                            (ONLY orchestrator)
 ```
+
+**Note:** `ArchitectureAgent` and the original `OrchestratorAgent` (5-phase) do NOT exist. Only `EnforcedOrchestrator` is the orchestrator.
 
 ---
 

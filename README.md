@@ -2,7 +2,7 @@
 ---
 ## Purpose
 
-Auto-Doc is a secure AI-powered documentation generator for GitHub repositories, now powered by an agentic multi-agent system aligned with AST parsing and built using Object-Oriented Programming (OOP) principles. It fetches a public repository, analyzes its code structure through specialized agents, sanitizes sensitive data using entropy-based detection and custom rules, and generates professional documentation via Groq or OpenAI LLMs.
+Auto-Doc is a secure AI-powered documentation generator for GitHub repositories, now powered by an agentic multi-agent system aligned with AST parsing and built using Object-Oriented Programming (OOP) principles. It fetches a public repository, analyzes its code structure through specialized agents, sanitizes sensitive data using entropy-based detection and custom rules, and generates professional documentation via Groq, Gemini, OpenRouter, or local Ollama LLMs.
 
 ## Documentation Sections
 
@@ -55,24 +55,27 @@ cd ..
 ### 3. Set up environment variables
 
 ```bash
-# Copy the example file
-cp .env.example .env
+# Copy the example file to devops/.env (IMPORTANT: not project root)
+cp .env.example devops/.env
 ```
 
-Then open `.env` in your editor and fill in your keys:
+Then open `devops/.env` in your editor and fill in your keys. The system supports **4 LLM providers** (pick at least one):
 
 ```bash
-# Required — get your free key at https://console.groq.com/keys
+# Groq (default, fast free tier) — get key at https://console.groq.com/keys
 GROQ_API_KEY=gsk_your_groq_key_here
+
+# Google Gemini (free tier)
+# GEMINI_API_KEY=
+
+# OpenRouter (pay-per-use, many models)
+# OPENROUTER_API_KEY=
+
+# Ollama (local, no key needed)
+# OLLAMA_MODEL=tinyllama
 
 # Optional — without this you are limited to 60 GitHub API requests/hour
 GITHUB_TOKEN=github_pat_your_token_here
-
-# Optional — defaults to llama-3.3-70b-versatile if not set
-GROQ_MODEL=llama-3.3-70b-versatile
-
-# Optional — only needed for CI/CD headless mode
-REPO_URL=https://github.com/yourusername/your-repo
 ```
 
 **How to get your Groq API key:**
@@ -91,13 +94,30 @@ REPO_URL=https://github.com/yourusername/your-repo
 
 ### 4. Run the application
 
+Start both backend and frontend in separate terminals:
+
+```bash
+# Terminal 1: Backend (Express on port 3000)
+npm run dev
+
+# Terminal 2: Frontend (Vite on port 5173)
+cd client && npm run dev
+```
+
+Then open http://localhost:5173 in your browser.
+
+**Production build:**
+```bash
+cd client && npm run build    # builds to project root public/ folder
+npm start                      # serves static frontend + API on port 3000
+```
 
 ---
 
 ### 5. Generate your first documentation
 
-1. Select **Cloud (Groq)** as your LLM provider
-2. Paste your Groq API key in the key field
+1. Select your LLM provider (Groq, Gemini, OpenRouter, or Local Ollama)
+2. Paste your API key in the key field (not needed for Ollama)
 3. Paste a public GitHub repository URL (e.g. `https://github.com/expressjs/express`)
 4. Click **Fetch Repo** → **Build Input** → **Generate Docs**
 
@@ -131,3 +151,58 @@ Output is written to the `docs/` folder.
 | DELETE | `/rules/:id` | Remove a custom rule |
 | POST | `/rules/test` | Test a regex pattern against sample text |
 | GET | `/health` | Health check |
+
+---
+
+## Pre-Commit Hooks (Husky + lint-staged)
+
+The project uses **Husky** for Git hooks and **lint-staged** for running ESLint on staged files.
+
+### Configuration
+
+| File | Purpose |
+|------|---------|
+| `prepare: "husky"` in package.json | Installs Husky on `npm install` |
+| `lint-staged` config in package.json | Defines which files to lint |
+
+### What It Does
+
+On `git commit`:
+1. **Backend files** (`src/**/*.js`) → Runs `eslint --fix`
+2. **Frontend files** (`client/src/**/*.{js,jsx}`) → Runs `eslint --fix --config client/eslint.config.js`
+
+### Bypassing (if needed)
+
+```bash
+git commit --no-verify
+```
+
+---
+
+## Render.com Deployment
+
+A `render.yaml` file exists for one-click deployment to [Render.com](https://render.com).
+
+### Setup
+
+1. Go to [render.com/new/blueprint](https://render.com/new/blueprint)
+2. Connect your GitHub repository
+3. Render will detect `render.yaml` and configure the services
+
+### What render.yaml Defines
+
+| Resource | Type | Description |
+|----------|------|-------------|
+| `backend` | Web Service | Express API (Node.js) on port 3000 |
+| `frontend` | Static Site | Vite build → static files |
+
+### Required Environment Variables
+
+Set these in Render dashboard for the backend service:
+
+| Variable | Value |
+|----------|-------|
+| `GROQ_API_KEY` | Your Groq API key |
+| `GITHUB_TOKEN` | Optional, for higher GitHub API rate limit |
+| `GEMINI_API_KEY` | Optional, for Gemini provider |
+| `OPENROUTER_API_KEY` | Optional, for OpenRouter provider |
