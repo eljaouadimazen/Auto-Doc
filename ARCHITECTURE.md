@@ -13,18 +13,19 @@ Runs entirely on the server. No sensitive data leaves this layer unfiltered.
 **Responsibilities:**
 - Fetch repository content from GitHub via Octokit REST API
 - Parse code structure using a custom regex-based AST parser (no ts-morph, no external parser dependency)
-- Detect and redact sensitive data using 20+ built-in regex patterns
+- Detect and redact sensitive data using 34 built-in regex patterns + Shannon entropy detection
 - Build structured LLM prompts (AST mode or raw mode)
 - Log every sanitization event to the in-memory audit log
 
 **Technologies:**
 - Node.js / Express
-- @octokit/rest — GitHub API client
+- @octokit/rest — GitHub API client (encapsulated in `Repository` model)
 - Custom `ASTParserService` — regex-based JS/TS and Python parser
-- Custom `SanitizerService` — secret detection and redaction
+- Custom `SanitizerService` + `SanitizerSession` — secret detection with vault tokenization
 - Custom `LLMInputBuilderService` — prompt construction
-- Custom `AuditLogService` — in-memory audit trail
+- `AuditLog` model — per-repository in-memory audit trail
 - Custom `RateLimiter` — sliding window rate limiting (no Redis needed)
+- `LogSanitizer` — global console.error secret stripping
 
 ---
 
@@ -36,11 +37,16 @@ Receives only sanitized, structured summaries. Never receives raw secrets.
 - Accept structured prompt messages from the local layer
 - Generate professional documentation using LLM
 
-**Technologies:**
-- Groq API (`llama-3.3-70b-versatile` model)
-- Axios — HTTP client for Groq API calls
+**Supported Providers (4):**
 
-**Key security property:** The prompt sent to Groq contains only AST summaries (function names, class names, routes, imports, env var names) — never raw file contents with secrets.
+| Provider | Library | Default Model |
+|----------|---------|---------------|
+| **Groq** (default) | `@langchain/groq` | `llama-3.3-70b-versatile` |
+| **Gemini** | `@langchain/google-genai` | `gemini-2.0-flash` |
+| **OpenRouter** | OpenAI-compatible | `meta-llama/llama-3.3-70b-instruct` |
+| **Ollama** | Local, no API key | `tinyllama` (configurable) |
+
+**Key security property:** The prompt sent to LLM contains only AST summaries and vault tokens — never raw file contents with secrets.
 
 ---
 
@@ -59,18 +65,29 @@ Receives only sanitized, structured summaries. Never receives raw secrets.
 
 ## Service Architecture
 
+**Note:** GitHub fetching is built into the `Repository` model (`src/models/repository.model.js`) using Octokit directly. There is NO separate `github.service.js`.
+
 ```
 src/
 ├── app.js                          ← Express server, routes, middleware
 ├── controllers/
 │   └── generator.controller.js     ← Pipeline orchestration, API key handling
+├── models/                         ← OOP Domain Models (business logic)
+│   ├── user.model.js               ← User context + API key validation
+│   ├── repository.model.js         ← GitHub fetching + aggregate root
+│   ├── project-file.model.js       ← File entity with self-sanitization
+│   ├── audit-log.model.js          ← Per-repo in-memory audit trail
+│   ├── sanitization-rule.model.js  ← Regex rule value object
+│   └── documentation.model.js      ← Generated doc artifact
 └── services/
-    ├── github.service.js           ← Octokit repo fetcher
-    ├── sanitizer.service.js        ← Secret detection + redaction
-    ├── ast-parser.service.js       ← JS/TS/Python AST extraction
-    ├── llm-input-builder.service.js ← Prompt builder (AST + raw modes)
-    ├── llm.service.js              ← Groq API client
-    ├── audit-log.service.js        ← In-memory audit trail
+    ├── sanitizer.service.js        ← Regex pattern matching (34 built-in)
+    ├── sanitizer-session.js        ← Per-request vault for tokenization
+    ├── sanitizer-session-store.js  ← Session persistence across HTTP requests
+    ├── log-sanitizer.js            ← Global console.error secret stripping
+    ├── ast-parser.service.js       ← Regex-based JS/TS/Python parser
+    ├── llm-input-builder.service.js ← Prompt builder (AST + raw modes, chunks)
+    ├── llm.service.js              ← 4-provider LLM client
+    ├── diagram.service.js          ← High-signal file selector for diagrams
     └── rate-limiter.middleware.js  ← Sliding window rate limiter
 ```
 
@@ -81,15 +98,17 @@ src/
 ```
 GitHub URL
     ↓
-github.service.js         → Fetch repo via Octokit, decode base64 files
+Repository model          → Octokit fetch, base64 decode (NO github.service.js)
     ↓
-sanitizer.service.js      → Redact secrets (20+ patterns), log findings
+SanitizerSession          → Vault-based tokenization (regex + entropy)
     ↓
 ast-parser.service.js     → Extract classes, functions, routes, imports, env vars
     ↓
-llm-input-builder.service.js → Build structured prompt (AST or raw mode)
+llm-input-builder.service.js → Build structured prompt (AST or raw mode, chunks)
     ↓
-llm.service.js            → POST to Groq API (llama-3.3-70b-versatile)
+llm.service.js            → POST to configured LLM (Groq/Gemini/OpenRouter/Ollama)
+    ↓
+SanitizerSession          → reintegrate() swaps vault tokens back to original values
     ↓
 Documentation output      → Returned to client or written to docs/
 ```
@@ -114,3 +133,69 @@ Files are truncated to a token budget (`MAX_FILE_CHARS = 3000`, `MAX_TOTAL_CHARS
 | `/build` | 20 requests | 15 minutes |
 | `/generate-docs` | 10 requests | 15 minutes |
 | All others | 60 requests | 15 minutes |
+
+---
+
+## Docker Deployment
+
+**Files in `devops/`:**
+
+| File | Purpose |
+|------|---------|
+| `Dockerfile.backend` | Express backend container |
+| `Dockerfile.frontend` | Multi-stage build: Vite build → nginx serve |
+| `docker-compose.yml` | Full stack orchestration |
+
+### Dockerfile.backend
+
+Node.js-based container for the Express API:
+- Base: `node:20-alpine`
+- Exposes port 3000
+- Runs `npm start` as entry point
+
+### Dockerfile.frontend
+
+Multi-stage build for optimized frontend:
+1. **Build stage**: `node:20-alpine` → runs `npm run build`
+2. **Serve stage**: `nginx:alpine` → serves static files from `public/`
+- Exposes port 80
+
+### docker-compose.yml
+
+Orchestrates both services:
+```yaml
+services:
+  backend:
+    build:
+      context: ..
+      dockerfile: devops/Dockerfile.backend
+    ports:
+      - "3000:3000"
+    environment:
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - OPENROUTER_API_KEY=${OPENROUTER_API_KEY}
+      - GITHUB_TOKEN=${GITHUB_TOKEN}
+
+  frontend:
+    build:
+      context: ..
+      dockerfile: devops/Dockerfile.frontend
+    ports:
+      - "80:80"
+    depends_on:
+      - backend
+```
+
+### Running with Docker Compose
+
+```bash
+# Build and start
+cd devops
+docker-compose up --build
+
+# Stop
+docker-compose down
+```
+
+**Note:** Environment variables must be set in `devops/.env` before running.

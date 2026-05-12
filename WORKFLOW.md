@@ -12,23 +12,24 @@ The web UI exposes the pipeline as 3 explicit steps so users can inspect interme
 Step 1: Fetch & Sanitize
     User pastes GitHub URL → POST /fetch
     ↓
-    github.service fetches all files via Octokit recursively
-    sanitizer.service redacts secrets (double pass)
-    Returns: sanitized markdown blob + preview + size
+    Repository model fetches all files via Octokit recursively (NO github.service.js)
+    SanitizerSession + SanitizerService tokenize secrets (regex + entropy)
+    Returns: sanitized markdown blob + preview + size + audit summary
 
 Step 2: Build LLM Input
     POST /build (with sanitized markdown + useAST flag)
     ↓
     llm-input-builder parses files from markdown
-    sanitizer.service runs audit → audit-log records findings
+    SanitizerSession audit → AuditLog model records findings (pattern names only)
     ast-parser extracts code structure (AST mode) OR truncates (raw mode)
-    Builds structured prompt messages
-    Returns: messages array + audit summary + mode used
+    Builds structured prompt messages in chunks
+    Returns: chunks array + audit summary + mode used + vaultSize + sessionId
 
 Step 3: Generate Documentation
-    POST /generate-docs (with messages array)
+    POST /generate-docs (with chunks + sessionId)
     ↓
-    llm.service sends prompt to Groq API (llama-3.3-70b-versatile)
+    llm.service sends prompt to configured LLM (Groq/Gemini/OpenRouter/Ollama)
+    SanitizerSession.reintegrate() swaps vault tokens back to original values
     Returns: generated markdown documentation
 ```
 
@@ -47,10 +48,10 @@ Layer 1: GitHub path filter
     YES → continue
 
 Layer 2: Semantic diff (scripts/semantic-diff.js)
-    For each changed .js/.ts/.py file:
+    For each changed .js/.ts/.jsx/.tsx/.mjs/.py file:
         Parse AST signature BEFORE (git show baseSHA:file)
         Parse AST signature AFTER (current file)
-        Compare: classes, methods, routes, imports, env vars
+        Compare: classes, methods, routes, imports, env vars, exports
     ↓
     Only internal logic changed → SKIP (docs still accurate)
     Structural change detected  → GENERATE
