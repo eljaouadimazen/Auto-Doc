@@ -187,14 +187,35 @@ class SanitizerSession {
     ];
 
     const findings = [];
+    const seen = new Set();
     text.split('\n').forEach((line, lineNum) => {
       if (SAFE_CONTEXTS.some(p => p.test(line))) return;
-      const m = line.match(/[:=]\s*["']?([A-Za-z0-9+/=_\-]{20,})["']?/);
-      if (!m) return;
-      const candidate = m[1];
-      const entropy   = this._shannonEntropy(candidate);
-      if (entropy > 4.2) {
-        findings.push({ value: candidate, entropy: entropy.toFixed(2), line: lineNum + 1 });
+
+      // Pass 1: value after = or : in key-value pairs
+      const m1 = line.match(/[:=]\s*["']?([A-Za-z0-9+/=_\-]{20,})["']?/);
+      if (m1) {
+        const candidate = m1[1];
+        if (!seen.has(candidate)) {
+          seen.add(candidate);
+          const entropy = this._shannonEntropy(candidate);
+          if (entropy > 3.8) {
+            findings.push({ value: candidate, entropy: entropy.toFixed(2), line: lineNum + 1 });
+          }
+        }
+        return;
+      }
+
+      // Pass 2: standalone long alphanumeric tokens (potential tokens without key= prefix)
+      const m2 = line.match(/["']([A-Za-z0-9+/=_\-]{30,})["']/);
+      if (m2) {
+        const candidate = m2[1];
+        if (!seen.has(candidate)) {
+          seen.add(candidate);
+          const entropy = this._shannonEntropy(candidate);
+          if (entropy > 3.8) {
+            findings.push({ value: candidate, entropy: entropy.toFixed(2), line: lineNum + 1 });
+          }
+        }
       }
     });
     return findings;

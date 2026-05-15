@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Auto-Doc — Repository Documentation Generator</title>
+  <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+
+  <!-- Mermaid for diagram rendering — startOnLoad:false so React controls when it runs -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+  </script>
+
+  <style>
+    .btn { transition: all 0.15s ease; }
+    .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important; }
+    .btn:not(:disabled):active { transform: scale(0.96); }
+    .animation-delay-200 { animation-delay: 0.2s; }
+    .animation-delay-400 { animation-delay: 0.4s; }
+    #root { min-height: 100svh; }
+
+    /* Mermaid diagram styling inside rendered output */
+    .rendered-output .mermaid {
+      background: white;
+      border: 1px solid var(--sand);
+      border-radius: 0.75rem;
+      padding: 1.5rem;
+      margin: 1rem 0;
+      text-align: center;
+      overflow-x: auto;
+    }
+    .rendered-output .mermaid svg {
+      max-width: 100%;
+      height: auto;
+    }
+  </style>
+  <script type="module" crossorigin src="/assets/index-CqR6WG6H.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-CqxH8q3r.css">
+</head>
+<body>
+  <div id="root"></div>
+</body>
+</html>

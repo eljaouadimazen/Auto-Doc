@@ -268,36 +268,6 @@ constructor(name, systemPrompt, {
 
 ---
 
-### 3.2 `SecurityAgent` — `src/agents/security.agent.js`
-
-Adds a **semantic AI layer** on top of the existing regex sanitizer. The regex sanitizer runs first (fast, reliable); this agent runs second for deeper context-aware inspection.
-
-**What it understands that regex cannot:**
-- `const x = 'sk-abc123'` → detected as an OpenAI key even if the variable isn't named `api_key`
-- `// example: password=test123` → recognized as a false positive (it's a comment example)
-- Hardcoded URLs with embedded credentials
-
-**Decision Logic (`shouldReview`):**
-- Files flagged by regex → agent confirms and searches for more
-- Files matching high-risk name patterns (`.env`, `config`, `credential`, `secret`, `auth`, `key`, `token`, `password`, `setting`) → always reviewed
-
-**Output Schema:**
-```json
-{
-  "path": "file path",
-  "riskLevel": "clean | low | medium | high | critical",
-  "confirmedSecrets": [{ "type": "...", "location": "...", "shouldRedact": true }],
-  "falsePositives": [{ "regexPattern": "...", "reason": "..." }],
-  "missedByRegex": [{ "type": "...", "location": "...", "shouldRedact": true }],
-  "recommendation": "safe_to_send | redact_and_send | do_not_send",
-  "notes": "..."
-}
-```
-
-**Configuration:** `temperature: 0.0` (deterministic), `maxTokens: 1000`, `maxRetries: 2`
-
----
-
 ### 3.3 `CodeIntelligenceAgent` — `src/agents/code-intelligence.agent.js`
 
 Replaces the regex-based AST parser with **LLM-powered code understanding**. Instead of extracting syntax, this agent understands **meaning**: what does this file actually do, what is the purpose of each class/function, what architectural decisions were made.
@@ -481,9 +451,9 @@ Two orchestrator implementations coordinate the agent pipeline.
 
 **Note: `src/agents/orchestrator.agent.js` does NOT exist in the codebase.**
 
-Only `EnforcedOrchestrator` exists (see Section 5.2). The old 5-phase `OrchestratorAgent` has been completely removed.
+Only `Orchestrator` exists (see Section 5.2). The old 5-phase `OrchestratorAgent` has been completely removed.
 
-**Historical Note:** The 5-phase pipeline described below was replaced by the certified 7-stage `EnforcedOrchestrator`:
+**Historical Note:** The 5-phase pipeline described below was replaced by the certified 7-stage `Orchestrator`:
 - Phase 1-2 (Filter/Security) → Stage 1-2 (File Retrieval + Security Gate)
 - Phase 1.5 (Fingerprint) → Stage 3 (Repo Analyzer)
 - Phase 3 (Code Intelligence) → Stage 6
@@ -492,7 +462,7 @@ Only `EnforcedOrchestrator` exists (see Section 5.2). The old 5-phase `Orchestra
 
 ---
 
-### 5.2 `EnforcedOrchestrator` — `src/agents/enforced-orchestrator.agent.js`
+### 5.2 `Orchestrator` — `src/agents/orchestrator.agent.js`
 
 A **certified 7-stage pipeline** designed to prevent hallucinated documentation and generate architectural diagrams.
 
@@ -505,8 +475,6 @@ Stage 1: FILE RETRIEVAL
 Stage 2: SECURITY GATE
     → SanitizerService.audit() on each file (regex + entropy)
     → Files with no findings pass immediately
-    → Flagged files sent to SecurityAgent for semantic review
-    → "do_not_send" files blocked; "redact_and_send" files anonymized
 
 Stage 3: REPO ANALYZER (anti-hallucination)
     → RepoAnalyzerAgent classifies project nature
@@ -710,9 +678,8 @@ safe-file-generator/
 │   ├── agents/                             ← Multi-Agent System (9 files)
 │   │   ├── base.agent.js                   ← Abstract base (LLM, retry, tracing, 4 providers)
 │   │   ├── protocol.js                     ← AgentInput/AgentOutput contract
-│   │   ├── enforced-orchestrator.agent.js  ← ONLY orchestrator (7-stage certified pipeline)
+│   │   ├── orchestrator.agent.js           ← Orchestrator (7-stage certified pipeline)
 │   │   ├── code-intelligence.agent.js      ← LLM-powered code understanding
-│   │   ├── security.agent.js               ← Semantic secret detection
 │   │   ├── writer.agent.js                 ← Documentation generation
 │   │   ├── repo-analyzer.agent.js          ← Project classification (absorbed fingerprint)
 │   │   ├── template-selector.agent.js      ← Template selection
@@ -766,7 +733,7 @@ safe-file-generator/
 - `src/services/github.service.js` — GitHub fetching is in `repository.model.js`
 - `src/services/audit-log.service.js` — Audit log is a model, not service
 - `src/services/fingerprint.service.js` — Absorbed by `repo-analyzer.agent.js`
-- `src/agents/orchestrator.agent.js` — Only `enforced-orchestrator.agent.js` exists
+- `src/agents/orchestrator.agent.js` — Now exists as the renamed orchestrator
 - `src/agents/architecture.agent.js` — Never implemented
 
 ---
@@ -840,13 +807,13 @@ safe-file-generator/
 │ + truncate(text)       │
 └────────┬───────────────┘
          │ extends
-    ┌────┴────┬───────────┬───────────────┬──────────────┬────────────────┬──────────────────┐
+     ┌────┴────┬───────────┬───────────────┬──────────────┬────────────────┬──────────────────┐
     ▼         ▼           ▼               ▼              ▼                ▼                  ▼
- Security   CodeIntel     Writer       RepoAnalyzer   TemplateSelector   DiagramAgent     EnforcedOrchestrator
-  Agent      Agent        Agent          Agent             Agent                            (ONLY orchestrator)
+ CodeIntel   Writer     RepoAnalyzer   TemplateSelector   DiagramAgent     Orchestrator
+  Agent      Agent        Agent             Agent                            (ONLY orchestrator)
 ```
 
-**Note:** `ArchitectureAgent` and the original `OrchestratorAgent` (5-phase) do NOT exist. Only `EnforcedOrchestrator` is the orchestrator.
+**Note:** `ArchitectureAgent` and the original `OrchestratorAgent` (5-phase) do NOT exist. Only `Orchestrator` is the orchestrator.
 
 ---
 
@@ -863,7 +830,7 @@ GitHub URL
                          │
                          ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  EnforcedOrchestrator / OrchestratorAgent                    │
+│  Orchestrator / OrchestratorAgent                    │
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
 │  Stage 1: FILE RETRIEVAL                                     │
@@ -908,16 +875,7 @@ GitHub URL
 ### Full OrchestratorAgent (5-Phase) — Additional Stages
 
 ```
-Phase 2: SECURITY (Parallel)
-    ┌───────────────────────────────────────────────┐
-    │ For each file (concurrent):                   │
-    │   1. SanitizerService.audit() → regex pass    │
-    │   2. SecurityAgent.run() → semantic AI pass   │
-    │   3. Merge findings → recommendation          │
-    │   4. Block "do_not_send" files                │
-    └───────────────────────────────────────────────┘
-
-Phase 3: CODE INTELLIGENCE (Batched)
+Phase 2: CODE INTELLIGENCE (Batched)
     ┌───────────────────────────────────────────────┐
     │ For each safe file (batches of 3):            │
     │   1. ASTParserService.parseFiles() → syntax   │

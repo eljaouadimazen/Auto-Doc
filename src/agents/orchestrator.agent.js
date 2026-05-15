@@ -1,12 +1,11 @@
 /**
- * enforced-orchestrator.agent.js
+ * orchestrator.agent.js
  */
 
 const BaseAgent               = require('./base.agent');
 const RepoAnalyzerAgent       = require('./repo-analyzer.agent');
 const TemplateSelectorAgent   = require('./template-selector.agent');
 const CodeIntelligenceAgent   = require('./code-intelligence.agent');
-const SecurityAgent           = require('./security.agent');
 const WriterAgent             = require('./writer.agent');
 const DiagramAgent            = require('./diagram.agent');
 const diagramService          = require('../services/diagram.service');
@@ -14,13 +13,12 @@ const protocol                = require('./protocol');
 
 const CODE_INTEL_LIMIT = 10;
 
-class EnforcedOrchestrator extends BaseAgent {
+class Orchestrator extends BaseAgent {
   constructor(options = {}) {
     super('Orchestrator', 'Coordinateur du pipeline de documentation certifié.');
     this.analyzer         = new RepoAnalyzerAgent();
     this.templateSelector  = new TemplateSelectorAgent();
     this.codeAgent        = new CodeIntelligenceAgent();
-    this.securityAgent    = new SecurityAgent();
     this.writer           = new WriterAgent();
     this.diagramAgent     = new DiagramAgent();
     this.onProgress       = options.onProgress || (() => {});
@@ -36,8 +34,8 @@ class EnforcedOrchestrator extends BaseAgent {
     const contextFiles = this.filterHighSignalFiles(files);
     this.onProgress({ stage: 1, message: `${contextFiles.length} files selected after filtering` });
 
-    // ── Stage 2: Security gate ─────────────────────────────────────────
-    const safeFiles = await this.runSecurityGate(contextFiles, agentInput.context, apiKey);
+    // ── Stage 2: Security gate (pass-through — Layer 1 handles sanitization) ──
+    const safeFiles = await this.runSecurityGate(contextFiles);
     this.onProgress({ stage: 2, message: `${safeFiles.length} files cleared security gate` });
 
     // ── Stage 3: Repo Analyzer ─────────────────────────────────────────
@@ -140,41 +138,8 @@ class EnforcedOrchestrator extends BaseAgent {
 
   // ── Helper Methods (Must be inside the class) ────────────────────────
 
-  async runSecurityGate(files, context, apiKey) {
-    const safe    = [];
-    const flagged = [];
-    const session = this.session;
-
-    for (const file of files) {
-      const findings = session ? session.audit(file.content || '') : [];
-      if (findings.length === 0) {
-        safe.push(file);
-      } else {
-        flagged.push({ file, findings });
-      }
-    }
-
-    if (flagged.length > 0) {
-      const securityChecks = await Promise.allSettled(
-        flagged.map(({ file, findings }) => {
-          const input = protocol.buildInput(
-            'Confirm security findings',
-            { ...context, apiKey },
-            { path: file.path, content: file.content, regexFindings: findings }
-          );
-          return this.securityAgent.run(input);
-        })
-      );
-
-      securityChecks.forEach((result, i) => {
-        const { file } = flagged[i];
-        if (result.status === 'fulfilled' && result.value.status === 'success') {
-          const rec = result.value.result?.recommendation;
-          if (rec === 'safe_to_send' || rec === 'redact_and_send') safe.push(file);
-        }
-      });
-    }
-    return safe;
+  async runSecurityGate(files) {
+    return files;
   }
 
   async runCodeIntelligence(files, context, apiKey) {
@@ -227,4 +192,4 @@ class EnforcedOrchestrator extends BaseAgent {
   }
 }
 
-module.exports = EnforcedOrchestrator;
+module.exports = Orchestrator;

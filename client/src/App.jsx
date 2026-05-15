@@ -1,6 +1,7 @@
 import { useState, useRef, useEffect } from 'react'
 import './App.css'
 
+
 function Navbar() {
   return (
     <nav className="navbar">
@@ -163,7 +164,7 @@ function Pipeline() {
       const res = await fetch('/build', {
         method: 'POST',
         headers: authHeaders(),
-        body: JSON.stringify({ rawMarkdown, useAST })
+        body: JSON.stringify({ rawMarkdown, useAST, repoName })
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Build failed')
@@ -179,6 +180,12 @@ function Pipeline() {
         summary += a.totalRedacted > 0
           ? `\n⚠ ${a.totalRedacted} secret(s) redacted in ${a.filesAffected} file(s)`
           : '\n✓ No secrets detected'
+        if (a.findings && a.findings.length > 0) {
+          summary += '\n\nRedacted files:'
+          for (const f of a.findings) {
+            summary += `\n  • ${f.file}: ${f.patterns.join(', ')}`
+          }
+        }
       }
       setOutput(summary)
       setStates(s => ({ ...s, build: true }))
@@ -501,7 +508,7 @@ function Features() {
     { icon: '⚡', title: 'AST Mode Parsing', desc: 'Extracts imports, classes, methods, routes, and env vars. ~95% token reduction with higher quality LLM output.' },
     { icon: '🔒', title: 'Secret Sanitization', desc: 'Double-pass sanitization catches API keys, tokens, and credentials before content reaches the LLM. Full audit logs.' },
     { icon: '🔄', title: 'CI/CD Automation', desc: 'Trigger on push to main/master/dev. Semantic diff detects structural changes — only regenerates when needed.' },
-    { icon: '🧠', title: 'Multi-Agent Orchestration', desc: 'EnforcedOrchestrator coordinates fetching, sanitization, parsing, and LLM generation in a reliable pipeline.' },
+    { icon: '🧠', title: 'Multi-Agent Orchestration', desc: 'Orchestrator coordinates fetching, sanitization, parsing, and LLM generation in a reliable pipeline.' },
   ]
 
   return (

@@ -2,7 +2,7 @@
 
 ## Overview
 
-Auto-Doc processes a GitHub repository through an agentic multi-agent pipeline orchestrated by the `EnforcedOrchestrator`.
+Auto-Doc processes a GitHub repository through an agentic multi-agent pipeline orchestrated by the `Orchestrator`.
 
 ## Manual Pipeline (Web Interface)
 

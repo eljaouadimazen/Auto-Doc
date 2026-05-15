@@ -5,7 +5,7 @@
 Auto-Doc uses a two-layer smart triggering system built on GitHub Actions. The pipeline only generates documentation when the code structure actually changed — not on every push.
 
 The pipeline supports **two documentation modes**:
-- **Agentic** (default) — Multi-agent orchestrator pipeline with 7 specialized stages: repo analysis, template selection, security gate, code intelligence, diagram generation, and final writing
+- **Agentic** (default) — Multi-agent orchestrator pipeline: filter, repo analysis, template selection, code intelligence, diagram generation, and final writing
 - **Classic** — AST-based structural parsing → chunked LLM calls → merged output
 
 ---
@@ -72,7 +72,7 @@ Three workflow files exist in `.github/workflows/`:
      - Runs scripts/generate-docs-ci.js
      - Uses Repository model to fetch files via Octokit
      - Runs security audit via AuditLog model + SanitizerService
-     - Mode "agentic": EnforcedOrchestrator runs 7-stage agent pipeline
+      - Mode "agentic": Orchestrator runs 7-stage agent pipeline
      - Mode "classic": LLMInputBuilder chunks → LLMService generates per chunk
      - Env: GROQ_API_KEY, GITHUB_TOKEN, REPO_URL, GROQ_MODEL, DOC_MODE, DOC_PROVIDER
   6. Deploy to GitHub Pages (if skip=false)
@@ -89,12 +89,12 @@ Three workflow files exist in `.github/workflows/`:
 
   ### Agentic Mode (default)
 
-  Uses the `EnforcedOrchestrator` which coordinates 7 specialized agents:
+  Uses the `Orchestrator` pipeline with 7 stages:
 
   | Stage | Agent | Purpose |
   |-------|-------|---------|
   | 1 | Filter | Select high-signal files from the repo |
-  | 2 | SecurityAgent | Vault-anonymize secrets, confirm findings |
+  | 2 | (pass-through) | Sanitization handled by Layer 1 at fetch time |
   | 3 | RepoAnalyzerAgent | Classify project nature and detect logic signals |
   | 4 | TemplateSelectorAgent | Choose the best documentation template + diagram type |
   | 5 | CodeIntelligenceAgent | Deep file-level structural analysis |
@@ -151,7 +151,7 @@ Three workflow files exist in `.github/workflows/`:
         ├── AuditLog model        → Track sanitization findings
         ├── SanitizerService      → Vault-based secret anonymization
         └── GenerateDocumentation(mode, provider)
-            ├── "agentic" → EnforcedOrchestrator → 7 agents
+            ├── "agentic" → Orchestrator → 7 agents
             └── "classic" → LLMInputBuilder → LLMService chunks
   ```
 

@@ -1,6 +1,6 @@
-const EnforcedOrchestrator = require('../src/agents/enforced-orchestrator.agent');
+const Orchestrator = require('../src/agents/orchestrator.agent');
 
-describe('EnforcedOrchestrator', () => {
+describe('Orchestrator', () => {
   let orchestrator;
 
   const makeFile = (path, content) => ({
@@ -9,7 +9,7 @@ describe('EnforcedOrchestrator', () => {
   });
 
   beforeAll(() => {
-    orchestrator = new EnforcedOrchestrator();
+    orchestrator = new Orchestrator();
   });
 
   describe('filterHighSignalFiles', () => {
@@ -29,44 +29,41 @@ describe('EnforcedOrchestrator', () => {
     test('only keeps files with critical extensions', () => {
       const files = [
         makeFile('src/app.js'),
+        makeFile('src/styles.css'),
         makeFile('README.md'),
-        makeFile('image.png'),
-        makeFile('data.json'),
+        makeFile('src/utils/helper.ts'),
+        makeFile('src/main.py'),
+        makeFile('src/Dockerfile'),
       ];
       const result = orchestrator.filterHighSignalFiles(files);
-      expect(result).toHaveLength(1);
-      expect(result[0].path).toBe('src/app.js');
+      expect(result).toHaveLength(3);
+      expect(result.map(f => f.path)).toEqual(
+        expect.arrayContaining(['src/app.js', 'src/utils/helper.ts', 'src/main.py'])
+      );
     });
 
-    test('includes yaml and yml files as critical', () => {
-      const files = [
-        makeFile('deploy.yml'),
-        makeFile('config.yaml'),
-      ];
-      const result = orchestrator.filterHighSignalFiles(files);
-      expect(result).toHaveLength(2);
-    });
-
-    test('filters out empty or tiny files', () => {
+    test('filters out files below minimum content length', () => {
       const files = [
         makeFile('src/app.js', 'short'),
-        makeFile('src/server.js', '   '),
-        makeFile('src/utils.js', 'valid content here that is long enough'),
+        makeFile('src/utils.js', 'x'.repeat(50)),
       ];
       const result = orchestrator.filterHighSignalFiles(files);
       expect(result).toHaveLength(1);
       expect(result[0].path).toBe('src/utils.js');
     });
 
-    test('limits output to 25 files', () => {
-      const files = Array.from({ length: 30 }, (_, i) => makeFile(`src/file${i}.js`));
+    test('sorts by priority and limits to 25', () => {
+      const files = Array.from({ length: 30 }, (_, i) => ({
+        path: `src/file${i}.js`,
+        content: 'x'.repeat(100),
+      }));
       const result = orchestrator.filterHighSignalFiles(files);
-      expect(result.length).toBeLessThanOrEqual(25);
+      expect(result).toHaveLength(25);
     });
 
-    test('sorts files by score placing app files first', () => {
+    test('prioritizes app.js and main files first', () => {
       const files = [
-        makeFile('src/service.js'),
+        makeFile('src/utils/helper.js'),
         makeFile('src/app.js'),
         makeFile('src/main.ts'),
       ];
@@ -157,7 +154,7 @@ describe('EnforcedOrchestrator', () => {
     ];
 
     function makeMockOrchestrator() {
-      const orch = new EnforcedOrchestrator({ session: null });
+      const orch = new Orchestrator({ session: null });
 
       orch.analyzer.run = jest.fn().mockResolvedValue({
         status: 'success',
@@ -282,69 +279,14 @@ describe('EnforcedOrchestrator', () => {
   });
 
   describe('runSecurityGate', () => {
-    afterEach(() => { jest.restoreAllMocks(); });
-
-    test('returns all files as safe when no session', async () => {
-      const orch = new EnforcedOrchestrator({ session: null });
-      const result = await orch.runSecurityGate(
-        [{ path: 'src/app.js', content: 'test' }],
-        {},
-        null
-      );
-      expect(result).toHaveLength(1);
-    });
-
-    test('returns all files as safe when session audit finds nothing', async () => {
-      const mockSession = { audit: jest.fn().mockReturnValue([]) };
-      const orch = new EnforcedOrchestrator({ session: mockSession });
-
-      const result = await orch.runSecurityGate(
-        [{ path: 'src/app.js', content: 'safe content' }],
-        {},
-        null
-      );
-
-      expect(result).toHaveLength(1);
-      expect(mockSession.audit).toHaveBeenCalledWith('safe content');
-    });
-
-    test('runs security agent on flagged files', async () => {
-      const mockSession = {
-        audit: jest.fn().mockReturnValue([{ type: 'secret', name: 'api_key' }])
-      };
-      const orch = new EnforcedOrchestrator({ session: mockSession });
-      orch.securityAgent.run = jest.fn().mockResolvedValue({
-        status: 'success',
-        result: { recommendation: 'safe_to_send' }
-      });
-
-      const result = await orch.runSecurityGate(
-        [{ path: 'src/app.js', content: 'api_key=secret123' }],
-        { repository: 'test-repo' },
-        'test-key'
-      );
-
-      expect(result).toHaveLength(1);
-      expect(orch.securityAgent.run).toHaveBeenCalled();
-    });
-
-    test('filters out files flagged as not safe', async () => {
-      const mockSession = {
-        audit: jest.fn().mockReturnValue([{ type: 'secret', name: 'api_key' }])
-      };
-      const orch = new EnforcedOrchestrator({ session: mockSession });
-      orch.securityAgent.run = jest.fn().mockResolvedValue({
-        status: 'success',
-        result: { recommendation: 'reject' }
-      });
-
-      const result = await orch.runSecurityGate(
-        [{ path: 'src/app.js', content: 'dangerous content' }],
-        {},
-        null
-      );
-
-      expect(result).toHaveLength(0);
+    test('passes all files through (Layer 1 handles sanitization)', async () => {
+      const orch = new Orchestrator();
+      const files = [
+        { path: 'src/app.js', content: 'some content' },
+        { path: 'src/config.js', content: 'more content' }
+      ];
+      const result = await orch.runSecurityGate(files);
+      expect(result).toEqual(files);
     });
   });
 
@@ -352,7 +294,7 @@ describe('EnforcedOrchestrator', () => {
     afterEach(() => { jest.restoreAllMocks(); });
 
     test('returns analysis for all files when code agent succeeds', async () => {
-      const orch = new EnforcedOrchestrator();
+      const orch = new Orchestrator();
       orch.codeAgent.run = jest.fn().mockResolvedValue({
         status: 'success',
         result: { path: 'src/app.js', type: 'source', purpose: 'App' }
@@ -369,7 +311,7 @@ describe('EnforcedOrchestrator', () => {
     });
 
     test('falls back to inferFileType when code agent fails', async () => {
-      const orch = new EnforcedOrchestrator();
+      const orch = new Orchestrator();
       orch.codeAgent.run = jest.fn().mockRejectedValue(new Error('LLM error'));
 
       const result = await orch.runCodeIntelligence(

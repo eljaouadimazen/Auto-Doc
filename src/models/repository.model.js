@@ -5,7 +5,7 @@ const AuditLog = require('./audit-log.model');
 const Documentation = require('./documentation.model');
 const { sanitizeLog } = require('../services/log-sanitizer');
 
-const EnforcedOrchestrator = require('../agents/enforced-orchestrator.agent');
+const Orchestrator = require('../agents/orchestrator.agent');
 const protocol = require('../agents/protocol');
 const llmService = require('../services/llm.service');
 const llmInputBuilder = require('../services/llm-input-builder.service');
@@ -124,13 +124,13 @@ class Repository {
 
     try {
       if (mode === 'agentic') {
-        const orchestrator = new EnforcedOrchestrator({
+        const orchestrator = new Orchestrator({
           onProgress: (p) => console.info(`[Pipeline Stage ${p.stage}]`, p.message),
           session
         });
         const runId = protocol.generateRunId();
         const input = protocol.buildInput(
-          `Generate Enforced Documentation for ${this.#name}`,
+          `Generate Documentation for ${this.#name}`,
           { repository: this.#name, runId, apiKey: provider === 'ollama' ? null : apiKey, provider },
           { files: sanitizedFiles, provider }
         );

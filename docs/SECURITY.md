@@ -42,7 +42,11 @@ After the LLM generates documentation, `reintegrate(llmOutput)` swaps every toke
 
 ## Sensitive Data Detection
 
-### Built-in Detection Patterns (40+ patterns)
+### Built-in Detection Patterns (34 built-in patterns)
+
+**Two-tier sanitization system:**
+1. **`SanitizationRule.Apply()`** — Destructive replacement with `[REDACTED_SECRET]`
+2. **`SanitizerSession`** — Vault-based tokenization with re-integrable tokens
 
 #### Secrets & API Keys (21 patterns)
 
@@ -168,3 +172,108 @@ The following files are never sent to the LLM regardless of content:
 - `secrets.yaml`, `secrets.json`, `secrets.yml`
 - Anything inside `node_modules/`, `/vendor/`, `/dist/`, `/build/`, `/.git/`
 - Binary files: images, fonts, archives, executables, compiled assets
+
+---
+
+## Global Log Sanitizer (`log-sanitizer.js`)
+
+**File:** `src/services/log-sanitizer.js`
+
+A critical security feature that intercepts `console.error` globally and strips secrets from error messages before they hit logs.
+
+### How It Works
+
+1. **Applied at startup** (`src/app.js:15`):
+   ```javascript
+   const { sanitizeLog } = require('./services/log-sanitizer');
+   ```
+
+2. **Uses the same regex patterns** as the `SanitizerService` to detect:
+   - API keys (`gsk_...`, `sk-...`, `AIza...`)
+   - Database URIs with credentials
+   - Passwords, tokens, private keys
+   - Email addresses, PII
+
+3. **Replaces matches** with `[REDACTED]` in error output
+
+### Protection Scope
+
+| Threat | Mitigation |
+|--------|------------|
+| Accidental key leakage in stack traces | Secrets stripped before logging |
+| Debug output containing credentials | Patterns matched and redacted |
+| Third-party library error messages | Global hook intercepts all `console.error` |
+
+---
+
+## Sanitizer Session System
+
+**Files:**
+- `src/services/sanitizer-session.js` — Per-request vault
+- `src/services/sanitizer-session-store.js` — Session persistence across HTTP requests
+
+This is the **core vault-based tokenization system** that enables the multi-step HTTP pipeline (`/fetch` → `/build` → `/generate-docs`).
+
+### Two-Tier Sanitization Architecture
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│                    Two Sanitization Systems                   │
+├─────────────────────────────────┬───────────────────────────┤
+│  SanitizationRule (Model)       │  SanitizerSession         │
+├─────────────────────────────────┼───────────────────────────┤
+│  Destructive replacement        │  Vault-based tokenization  │
+│  Output: [REDACTED_SECRET]      │  Output: [TOKEN_XXX_a7b2] │
+│  Used in: ProjectFile.Sanitize()│  Used in: HTTP pipeline   │
+│  Cannot be reversed             │  Re-integrable after LLM   │
+└─────────────────────────────────┴───────────────────────────┘
+```
+
+### SanitizerSession Features
+
+| Feature | Description |
+|---------|-------------|
+| **Vault Storage** | `Map<token, originalValue>` — tokens map back to secrets |
+| **Token Format** | `[TOKEN_<PATTERN_NAME>_<4char_hash>]` — e.g., `[TOKEN_AWS_KEY_a7b2]` |
+| **Deduplication** | Identical values get the same token (reduces token count) |
+| **Entropy Detection** | Shannon entropy scan for high-entropy strings regex missed |
+| **Session Isolation** | Each request gets its own vault; cleared after `reintegrate()` |
+
+### SanitizerSessionStore Features
+
+| Feature | Description |
+|---------|-------------|
+| **Cross-Request Persistence** | Sessions stored by `sessionId` across HTTP requests |
+| **Multi-Step Pipeline** | Enables `/fetch` → `/build` → `/generate-docs` workflow |
+| **Lifecycle** | Created at `/build`, destroyed after `/generate-docs` |
+| **Session ID** | Returned in `/build` response; passed back to `/generate-docs` |
+
+### Token Lifecycle
+
+```
+1. User POST /fetch
+   └── Repository model fetches files
+   └── SanitizationRule.Apply() → [REDACTED_SECRET] (destructive)
+   └── Returns sanitized files
+
+2. User POST /build
+   └── SanitizerSessionStore.createSession() → sessionId
+   └── SanitizerSession.anonymize() → vault populated
+       ├── Regex patterns matched → tokens
+       └── Entropy scan → high-entropy strings tokenized
+   └── Returns { chunks, sessionId, vaultSize }
+
+3. User POST /generate-docs (with sessionId)
+   └── SanitizerSessionStore.get(sessionId) → vault restored
+   └── LLM generates docs using tokens (no real secrets)
+   └── SanitizerSession.reintegrate(output) → tokens → secrets
+   └── SanitizerSessionStore.destroy(sessionId) → vault cleared
+   └── Returns documentation with real values restored
+```
+
+### Why This Is Secure
+
+1. **Real secrets never leave the server** — only context-aware tokens
+2. **LLM can reason about tokens** — `[TOKEN_AWS_KEY_a7b2]` tells the LLM "this is an AWS key"
+3. **Vault is ephemeral** — destroyed after each pipeline run
+4. **No persistence** — sessions are in-memory only; lost on server restart

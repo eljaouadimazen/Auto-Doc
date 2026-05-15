@@ -800,6 +800,12 @@ pre.bg-off-white {
   text-decoration: underline;
 }
 
+.btn-sm {
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 6px;
+}
+
 /* ===== Disabled state ===== */
 .disabled\:opacity-40:disabled {
   opacity: 0.4;

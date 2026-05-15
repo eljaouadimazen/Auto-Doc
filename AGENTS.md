@@ -1,46 +1,54 @@
 # AGENTS.md
 
 ## Structure
-- **Backend**: Express.js, entrypoint `src/app.js`, port 3000
-- **Frontend**: React + Vite in `client/`, entrypoint `client/src/main.jsx`, dev server on port 5173
-- **Agents**: Multi-agent system in `src/agents/` — orchestrator, repo-analyzer, security, writer, diagram, template-selector, code-intelligence
+- **Backend**: Express.js, entrypoint `src/app.js`, port 3000, CommonJS (`require`)
+- **Frontend**: React + Vite in `client/`, entrypoint `client/src/main.jsx`, dev server on port 5173, ESM (`import`)
+- **Agents**: `src/agents/` — orchestrator, repo-analyzer, writer, diagram, template-selector, code-intelligence, base, protocol
+- **Tests**: `tests/**/*.test.js`, Jest with `node` environment, coverage thresholds at 30%
 
 ## Commands
 ```bash
 # Backend
-npm start            # production
-npm run dev          # dev with nodemon (runs fuser -k 3000/tcp first)
+npm start              # production
+npm run dev            # dev with nodemon (kills port 3000 via fuser first)
+npm run lint           # ESLint check
+npm test               # Jest tests (verbose)
+npm run test:coverage  # Jest with coverage report
 
-# Frontend
-cd client && npm run dev      # Vite dev server, proxies API to :3000
-cd client && npm run build    # outputs to ../public (not client/dist)
-cd client && npm run lint     # ESLint check
+# Frontend (run from client/)
+cd client && npm run dev     # Vite dev server, proxies /fetch, /build, etc. to :3000
+cd client && npm run build   # outputs to client/public/ (not client/dist)
+cd client && npm run lint    # ESLint check
 
-# CI docs generation (requires GROQ_API_KEY and REPO_URL in .env)
-npm run generate:ci
+# CI docs generation
+npm run generate:ci          # requires GROQ_API_KEY + REPO_URL in devops/.env
 
-# CI install (used in workflow)
+# CI install (required for clean installs)
 npm ci --legacy-peer-deps
 ```
 
 ## Key quirks
-- **Vite proxy**: `/fetch`, `/build`, `/generate`, `/generate-docs`, `/validate-key`, `/audit`, `/rules`, `/health` → `localhost:3000`
-- **Frontend build output**: `client/vite.config.js` sets `outDir: '../public'`; backend serves this static dir
-- **No test suite**: `npm test` exits with error
-- **Semantic diff gate**: `scripts/semantic-diff.js` compares structural changes across commits; `generate-docs.yml` skips doc regeneration when only internal logic changes. Set `FORCE=true` to override.
-- **Doc generation mode**: `DOC_MODE=agentic|classic` controls multi-agent vs AST+LLM pipeline (default `agentic` in CI). `DOC_PROVIDER=groq|openai|gemini` selects LLM backend (default `groq`).
+- **Env loading**: `dotenv` loads from `devops/.env`, NOT project root — affects both app and scripts
+- **Module systems**: Backend is CJS (`require`), frontend is ESM (`import`) — `client/package.json` has `"type": "module"`
+- **Pre-commit hooks** (husky + lint-staged): blocks trailing whitespace, missing EOF newline, merge conflict markers, private keys (`BEGIN * PRIVATE KEY`); validates JSON (not lockfiles) and YAML (tabs forbidden) syntax; then runs `eslint --fix` on staged backend/frontend files. Bypass with `--no-verify`.
+- **Rate limiter**: In-memory per-IP sliding window — `/fetch` and `/generate-docs` 10/15min, `/build` 20/15min, default 60/15min
+- **Audit log persistence**: SQLite DB at `data/audit-log.db`
 
-## Environment
-- `GROQ_API_KEY` (required) — Groq API key for LLM access
-- `GITHUB_TOKEN` (optional) — raises GitHub API rate limit from 60 to 5000 req/hour
-- `GROQ_MODEL` (optional, default `llama-3.3-70b-versatile`)
-- `REPO_URL` (optional, used in CI headless mode)
-- `DOC_MODE`, `DOC_PROVIDER` — control CI doc generation (see Key quirks)
-- `LANGSMITH_*` (optional) — LangChain tracing: `LANGSMITH_TRACING`, `LANGSMITH_ENDPOINT`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`
-- `PINECONE_API_KEY`, `PINECONE_INDEX` (optional) — vector DB for code-intelligence agent
+## Agent pipeline
+Orchestrator stages (in `orchestrator.agent.js`):
+1. Filter high-signal files
+2. Security gate (pass-through — Layer 1 handles sanitization)
+3. RepoAnalyzer → 4. TemplateSelector → 5. CodeIntelligence → 6. Writer → 7. Diagram
 
-## Docs
-- Architecture: `ARCHITECTURE.md`, `OOP_ARCHITECTURE.md`, `WORKFLOW.md`, `SECURITY.md`
-- API endpoints listed in `README.md`
-- Auto-generated docs deploy to GitHub Pages via `generate-docs.yml`
-- CI/CD details in `CI-CD.md`
+All agents communicate via `protocol.js` (`buildInput`, `buildSuccess`, `buildFailure`, `buildSkipped`, `validateOutput`).
+
+## Semantic diff gate
+`scripts/semantic-diff.js` compares AST signatures (classes, methods, routes, imports, exports, env vars) between commits. Only structural changes trigger doc regeneration. Set `FORCE=true` to override.
+
+## Docker
+- Dockerfiles in `devops/` (not root): `Dockerfile.backend` (Express) and `Dockerfile.frontend` (Nginx-static)
+- Docker Hub images: `mazeneljaouadi/safe-file-generator` (backend), `mazeneljaouadi/safe-file-generator-frontend`
+- CI builds, Trivy-scans (HIGH/CRITICAL severity), and pushes on push to main/master/dev
+
+## Environment (from `devops/.env`)
+Pick at least one LLM provider: `GROQ_API_KEY` (default), `GEMINI_API_KEY`, `OPENROUTER_API_KEY`, or `OLLAMA_MODEL` (local, no key). See `.env.example` for full list including `GITHUB_TOKEN`, model overrides, LangSmith tracing, and Pinecone vector DB.

@@ -133,6 +133,81 @@ MIIEowIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy
     });
   });
 
+  describe('elevated security patterns', () => {
+    test('detects aws_secret_access_key in credentials profile', () => {
+      const text = 'aws_secret_access_key = 1tUm636uS1yOEcfP5pvfqJ/ml36mF7AkyHsEU0IU';
+      const anon = session.anonymize(text);
+      expect(anon).not.toContain('1tUm636uS1yOEcfP5pvfqJ/ml36mF7AkyHsEU0IU');
+    });
+
+    test('detects aws_session_token', () => {
+      const text = 'aws_session_token = IQoJb3JpZ2luX2VIQg7zKZ0=';
+      const anon = session.anonymize(text);
+      expect(anon).not.toContain('IQoJb3JpZ2luX2V');
+    });
+
+    test('detects SSH public key', () => {
+      const text = 'ssh-rsa AAAAB3NzaC1yc2EAAAADAQABAAABAQDDW3G user@host';
+      const anon = session.anonymize(text);
+      expect(anon).not.toContain('AAAAB3NzaC1yc2E');
+    });
+
+    test('detects GitLab personal access token', () => {
+      const text = 'gitlab_token = glpat-ABCDEFGHIJKLMNOPQRSTUVWXYZ';
+      const anon = session.anonymize(text);
+      expect(anon).not.toContain('glpat-');
+    });
+
+    test('detects Slack webhook URL', () => {
+      const text = 'https://hooks.slack.com/services/TXXXXXXXX/BXXXXXXXX/faketoken123';
+      const anon = session.anonymize(text);
+      expect(anon).not.toContain('TXXXXXXXX');
+      expect(anon).not.toContain('XXXXXXXXXXXXXXXXXXXXXXXX');
+    });
+
+    test('detects Discord webhook URL', () => {
+      const text = 'https://discord.com/api/webhooks/123456789/ABCdefGHIjklMNOpqrsTUVwxyzABCDefGHIjklMNOpqrsTUVwxyz';
+      const anon = session.anonymize(text);
+      expect(anon).not.toContain('webhooks/123456789');
+    });
+
+    test('detects Authorization: Basic header', () => {
+      const text = 'Authorization: Basic QWxhZGRpbjpPcGVuU2VzYW1l';
+      const anon = session.anonymize(text);
+      expect(anon).not.toContain('QWxhZGRpbjpPcGVuU2VzYW1l');
+    });
+
+    test('detects Authorization: Bearer header', () => {
+      const text = 'Authorization: Bearer eyJhbGciOiJIUzI1NiJ9.dGVzdA.test123';
+      const anon = session.anonymize(text);
+      expect(anon).not.toContain('Bearer');
+    });
+
+    test('detects .npmrc _auth', () => {
+      const text = '_auth = QWxhZGRpbjpPcGVuU2VzYW1l';
+      const anon = session.anonymize(text);
+      expect(anon).not.toContain('QWxhZGRpbjpPcGVuU2VzYW1l');
+    });
+
+    test('detects Docker config auth JSON', () => {
+      const text = '"auth": "dXNlcjpwYXNzd29yZA=="';
+      const anon = session.anonymize(text);
+      expect(anon).not.toContain('dXNlcjpwYXNzd29yZA');
+    });
+
+    test('detects PGP public key block', () => {
+      const text = `-----BEGIN PGP PUBLIC KEY BLOCK-----\nmQENBF8=\n-----END PGP PUBLIC KEY BLOCK-----`;
+      const anon = session.anonymize(text);
+      expect(anon).not.toContain('BEGIN PGP PUBLIC KEY BLOCK');
+    });
+
+    test('detects DSA private key block', () => {
+      const text = `-----BEGIN DSA PRIVATE KEY-----\nMIIBvAIBAA==\n-----END DSA PRIVATE KEY-----`;
+      const anon = session.anonymize(text);
+      expect(anon).not.toContain('BEGIN DSA PRIVATE KEY');
+    });
+  });
+
   describe('audit (read-only)', () => {
     test('detects pattern types without modifying text', () => {
       const text = 'const key = "AKIAIOSFODNN7EXAMPLE";';
@@ -148,22 +223,23 @@ MIIEowIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy
   });
 
   describe('shannon entropy detection', () => {
-    test('detects high-entropy strings', () => {
-      const text = 'const secret = "xK9$mP2vL8qR4wN7jF5hT3yB"';
-      const hits = session.detectHighEntropyStrings
-        ? session.detectHighEntropyStrings(text)
-        : [];
-      if (hits.length > 0) {
-        expect(hits[0].entropy).toBeGreaterThan(4.0);
-      }
+    test('detects high-entropy strings with lowered threshold (3.8)', () => {
+      const text = 'const secret = "xK9mP2vL8qR4wN7jF5hT3yB"';
+      const hits = session._detectHighEntropyStrings(text);
+      expect(hits.length).toBeGreaterThan(0);
+      expect(parseFloat(hits[0].entropy)).toBeGreaterThan(3.8);
     });
 
     test('low-entropy strings are not flagged', () => {
       const text = 'const greeting = "hello world";';
-      const hits = session.detectHighEntropyStrings
-        ? session.detectHighEntropyStrings(text)
-        : [];
+      const hits = session._detectHighEntropyStrings(text);
       expect(hits).toEqual([]);
+    });
+
+    test('detects standalone quoted token without key= prefix', () => {
+      const text = 'token = "G8qR4wN7jF5hT3yBxK9mP2vL8qR4wN7jF5hT3yB"';
+      const hits = session._detectHighEntropyStrings(text);
+      expect(hits.length).toBeGreaterThan(0);
     });
   });
 

@@ -38,10 +38,13 @@ class SanitizerService {
       { name: 'postgres_uri',     regex: /postgres(?:ql)?:\/\/[^\s"']+/gi },
       { name: 'mysql_uri',        regex: /mysql:\/\/[^\s"']+/gi },
       { name: 'redis_uri',        regex: /redis:\/\/[^\s"']+/gi },
-      { name: 'private_key_block',regex: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g },
+      { name: 'private_key_block',regex: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY(?: BLOCK)?-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY(?: BLOCK)?-----/g },
       { name: 'ssh_private_key',  regex: /-----BEGIN OPENSSH PRIVATE KEY-----[\s\S]*?-----END OPENSSH PRIVATE KEY-----/g },
+      { name: 'pgp_public_block', regex: /-----BEGIN PGP PUBLIC KEY BLOCK-----[\s\S]*?-----END PGP PUBLIC KEY BLOCK-----/g },
       { name: 'certificate',      regex: /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g },
       { name: 'dotenv_value',     regex: /^([A-Z][A-Z0-9_]{2,})\s*=\s*["']?([^\s"'\n]{8,})["']?$/gm },
+      // URL-embedded credentials (must be before email to avoid partial email-in-URL matches)
+      { name: 'basic_auth_url',   regex: /https?:\/\/[^:]+:[^@]+@[^\s"']+/gi },
       // PII
       { name: 'email',            regex: /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g },
       { name: 'phone_us',         regex: /(\+1[\s\-.]?)?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}/g },
@@ -53,6 +56,9 @@ class SanitizerService {
       { name: 'mac_address',      regex: /([0-9A-Fa-f]{2}[:\-]){5}[0-9A-Fa-f]{2}/g },
       { name: 'iban',             regex: /\b[A-Z]{2}[0-9]{2}[A-Z0-9]{4}[0-9]{7}([A-Z0-9]?){0,16}\b/g },
       { name: 'date_of_birth',    regex: /\b(?:dob|date.of.birth|birthdate)\s*[:=]\s*\d{1,2}[\/\-]\d{1,2}[\/\-]\d{2,4}/gi },
+      // Webhook URLs (must be before passport to avoid partial matches like T00000000)
+      { name: 'slack_webhook',    regex: /https:\/\/hooks\.slack\.com\/services\/T[A-Z0-9]{8}\/[A-Za-z0-9]{8,}\/[A-Za-z0-9]{24,}/g },
+      { name: 'discord_webhook',  regex: /https:\/\/discord(?:app)?\.com\/api\/webhooks\/\d+\/[A-Za-z0-9_\-]{50,}/g },
       { name: 'passport',         regex: /\b[A-Z]{1,2}[0-9]{6,9}\b/g },
       { name: 'national_id',      regex: /\b(?:national.id|nid|cin)\s*[:=]\s*[A-Z0-9\-]{6,20}/gi },
       // Additional secrets
@@ -61,11 +67,25 @@ class SanitizerService {
       { name: 'twilio_token',     regex: /SK[a-z0-9]{32}/g },
       { name: 'firebase_key',     regex: /AAAA[A-Za-z0-9_\-]{7}:[A-Za-z0-9_\-]{140}/g },
       { name: 'jwt_token',        regex: /eyJ[A-Za-z0-9\-_]+\.eyJ[A-Za-z0-9\-_]+\.[A-Za-z0-9\-_.+/]*/g },
-      { name: 'basic_auth_url',   regex: /https?:\/\/[^:]+:[^@]+@[^\s"']+/gi },
       { name: 'heroku_api_key',   regex: /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/g },
       { name: 'npm_token',        regex: /npm_[A-Za-z0-9]{36}/g },
       { name: 'cloudinary_url',   regex: /cloudinary:\/\/[0-9]+:[A-Za-z0-9_\-]+@[a-z0-9]+/g },
       { name: 'sendgrid_key',     regex: /SG\.[A-Za-z0-9\-_]{22}\.[A-Za-z0-9\-_]{43}/g },
+
+      // Elevated patterns — AWS credentials profile format
+      { name: 'aws_secret_access_key', regex: /aws_secret_access_key\s*=\s*["']?[A-Za-z0-9+/=]{20,}["']?/g },
+      { name: 'aws_session_token',     regex: /aws_session_token\s*=\s*["']?[A-Za-z0-9+/=]{20,}["']?/g },
+      { name: 'aws_creds_section',     regex: /\[(?:default|profile\s+\w+)\]/g },
+      // SSH public keys
+      { name: 'ssh_pub_key',           regex: /(?:ssh-rsa|ssh-ed25519|ecdsa-sha2-nistp256|ssh-dss)\s+AAAA[0-9A-Za-z+/]+[=]{0,3}/g },
+      // GitLab tokens
+      { name: 'gitlab_token',          regex: /glpat-[A-Za-z0-9_\-]{20,}/g },
+      // Authorization headers
+      { name: 'authorization_basic',   regex: /(?:Authorization|authorization):\s*Basic\s+[A-Za-z0-9+/=]{10,}/g },
+      { name: 'authorization_bearer',  regex: /(?:Authorization|authorization):\s*Bearer\s+[A-Za-z0-9\-_.]{20,}/g },
+      // Config file creds
+      { name: 'npmrc_auth',            regex: /_auth\s*=\s*[A-Za-z0-9+/=]{10,}/g },
+      { name: 'docker_config_auth',    regex: /"auth":\s*"[A-Za-z0-9+/=]{10,}"/g },
     ];
 
     this.customRules     = [];

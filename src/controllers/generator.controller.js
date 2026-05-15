@@ -6,6 +6,9 @@ const sanitizerService = require('../services/sanitizer.service');
 const sessionStore     = require('../services/sanitizer-session-store');
 const SanitizationRule = require('../models/sanitization-rule.model');
 const { sanitizeLog }  = require('../services/log-sanitizer');
+const auditLogStore    = require('../services/audit-log-store.service');
+
+const auditCache = new Map(); // repoName → Layer 1 auditSummary
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -59,6 +62,11 @@ class GeneratorController {
       const repository  = await user.SubmitRepository(githubUrl);
       const safeFiles   = repository.files.map(f => f.toJSON());
       const rawMarkdown = filesToMarkdown(safeFiles);
+      const auditSummary = repository.auditLog.GetSummary();
+
+      auditLogStore.add(repository.name, githubUrl, auditSummary);
+      auditCache.set(repository.name, auditSummary);
+      setTimeout(() => auditCache.delete(repository.name), 30 * 60 * 1000);
 
       res.json({
         step:         'fetch',
@@ -67,7 +75,7 @@ class GeneratorController {
         repoName:     repository.name,
         size:         rawMarkdown.length,
         preview:      rawMarkdown.substring(0, 1000),
-        auditSummary: repository.auditLog.GetSummary()
+        auditSummary
       });
     } catch (err) {
       console.error('[fetchRepo]', sanitizeLog(err.message));
@@ -78,7 +86,7 @@ class GeneratorController {
   // --- STEP 2: BUILD INPUT ---
   async buildInput(req, res) {
     try {
-      const { files, rawMarkdown, useAST } = req.body;
+      const { files, rawMarkdown, useAST, repoName } = req.body;
       const provider = getProvider(req);
 
       const context = rawMarkdown || filesToMarkdown(files || []);
@@ -99,7 +107,7 @@ class GeneratorController {
         mode:         result.mode,
         vaultSize:    result.vaultSize,
         sessionId,
-        auditSummary: result.audit
+        auditSummary: (repoName && auditCache.get(repoName)) || result.audit
       });
     } catch (err) {
       console.error('[buildInput]', sanitizeLog(err.message));
@@ -250,15 +258,10 @@ class GeneratorController {
 
   // --- AUDIT LOGS ---
   getAuditLogs(req, res) {
+    const limit = Math.min(parseInt(req.query.limit) || 50, 100);
     res.json({
-      logs: [],
-      auditSummary: {
-        filesScanned:  0,
-        filesAffected: 0,
-        totalRedacted: 0,
-        findings:      [],
-        message:       'Audit logs are per-session — read from the fetch or build response.'
-      }
+      logs: auditLogStore.list(limit),
+      stats: auditLogStore.stats
     });
   }
 
