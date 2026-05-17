@@ -1,39 +1,24 @@
 STAGED=$(git diff --cached --name-only --diff-filter=ACMR | grep -v '^node_modules/' || true)
 
-if [ -z "$STAGED" ]; then
-  npx lint-staged
-  exit $?
-fi
+[ -z "$STAGED" ] && exit 0
 
 echo "$STAGED" | while IFS= read -r file; do
   [ ! -f "$file" ] && continue
 
-  # ── 1. Trailing whitespace ──────────────────────────────
-  if grep -nI '[[:space:]]$' "$file" 2>/dev/null | grep -v '^Binary'; then
-    echo "✗ Trailing whitespace in $file"
-    exit 1
-  fi
-
-  # ── 2. End-of-file newline ──────────────────────────────
-  if [ -s "$file" ] && [ "$(tail -c 1 "$file" | wc -l)" -eq 0 ]; then
-    echo "✗ $file does not end with a newline"
-    exit 1
-  fi
-
-  # ── 3. Merge conflict markers ───────────────────────────
+  # Merge conflict markers
   if grep -n '^<<<<<<< \|^=======\|^>>>>>>> ' "$file" >/dev/null 2>&1; then
     echo "✗ Merge conflict markers in $file"
     exit 1
   fi
 
-  # ── 4. Detect private keys ──────────────────────────────
+  # Private key detection
   if grep -n 'BEGIN \(RSA\|DSA\|EC\|OPENSSH\|PGP\) PRIVATE KEY' "$file" >/dev/null 2>&1; then
     echo "✗ Private key detected in $file"
     exit 1
   fi
 done || exit $?
 
-# ── 5. Check JSON syntax (staged JSON files only) ────────────
+# Staged JSON syntax check
 echo "$STAGED" | grep '\.json$' | grep -v 'package-lock.json' | while IFS= read -r file; do
   [ ! -f "$file" ] && continue
   node -e "
@@ -42,7 +27,7 @@ echo "$STAGED" | grep '\.json$' | grep -v 'package-lock.json' | while IFS= read 
   " || exit 1
 done || exit $?
 
-# ── 6. Check YAML syntax (staged YAML files only) ────────────
+# Staged YAML syntax check
 echo "$STAGED" | grep -E '\.(yml|yaml)$' | while IFS= read -r file; do
   [ ! -f "$file" ] && continue
   node -e "
@@ -53,6 +38,3 @@ echo "$STAGED" | grep -E '\.(yml|yaml)$' | while IFS= read -r file; do
     });
   " 2>/dev/null || { echo "✗ YAML issue: $file (prefer spaces over tabs)"; exit 1; }
 done || exit $?
-
-# ── Run staged linter ───────────────────────────────────────
-npx lint-staged

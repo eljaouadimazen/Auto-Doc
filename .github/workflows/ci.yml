@@ -1,31 +1,22 @@
-name: CI — Test, Scan & Push Docker Images
+name: CI — Test, Scan, Version & Push
 
 on:
   push:
-    branches: [main, master, dev]
+    branches: [main]
   workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
 
 env:
   BACKEND_IMAGE: mazeneljaouadi/safe-file-generator
   FRONTEND_IMAGE: mazeneljaouadi/safe-file-generator-frontend
+  REGISTRY: docker.io
 
 jobs:
-  # ── BEFORE DOCKER ──────────────────────────────────────────────────────────
-  test:
-    name: Run tests & coverage
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-          cache: 'npm'
-      - run: npm ci --legacy-peer-deps
-      - run: npm test
-      - run: npm run test:coverage
-
   lint:
-    name: Static code analysis
+    name: Lint
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -42,27 +33,97 @@ jobs:
           npm ci --legacy-peer-deps
           npm run lint
 
-  # ── DOCKER: BUILD → SCAN → PUSH ───────────────────────────────────────────
-  backend:
-    name: Build, scan & push backend
-    needs: [test, lint]
+  secrets:
+    name: Secrets scan
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Semgrep
+        uses: semgrep/semgrep-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          config: p/default
+
+  test:
+    name: Tests & coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci --legacy-peer-deps
+      - run: npm test
+      - run: npm run test:coverage
+
+  sca:
+    name: Dependency scan
+    needs: [lint, secrets, sast, test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan filesystem with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+
+  build-and-push:
+    name: Build, scan, version & push
+    needs: [sca]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci --legacy-peer-deps
+
+      - name: Compute short SHA
+        id: vars
+        run: echo "sha_short=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
       - uses: docker/setup-buildx-action@v3
       - uses: docker/login-action@v3
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
+
       - uses: docker/metadata-action@v5
         id: meta
         with:
           images: ${{ env.BACKEND_IMAGE }}
           tags: |
-            type=sha,prefix=
+            type=sha,prefix=sha-,format=short
             type=ref,event=branch
             type=raw,value=latest,enable={{is_default_branch}}
-      - name: Build image
+          labels: |
+            org.opencontainers.image.title=Safe File Generator (Backend)
+            org.opencontainers.image.description=Backend service for safe-file-generator
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.repository.updated_at }}
+
+      - name: Build and scan backend
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -73,60 +134,88 @@ jobs:
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=registry,ref=${{ env.BACKEND_IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.BACKEND_IMAGE }}:buildcache,mode=max
-      - name: Scan with Trivy
-        uses: aquasecurity/trivy-action@master
-        with:
-          image-ref: ${{ fromJSON(steps.meta.outputs.tags-json)[0] }}
-          exit-code: '1'
-          severity: 'HIGH,CRITICAL'
-          format: 'table'
-      - name: Push to Docker Hub
-        run: docker push --all-tags ${{ env.BACKEND_IMAGE }}
 
-  frontend:
-    name: Build, scan & push frontend
-    needs: [test, lint]
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: docker/setup-buildx-action@v3
-      - uses: docker/login-action@v3
-        with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
       - uses: docker/metadata-action@v5
-        id: meta
+        id: meta-frontend
         with:
           images: ${{ env.FRONTEND_IMAGE }}
           tags: |
-            type=sha,prefix=
+            type=sha,prefix=sha-,format=short
             type=ref,event=branch
             type=raw,value=latest,enable={{is_default_branch}}
-      - name: Build image
+          labels: |
+            org.opencontainers.image.title=Safe File Generator (Frontend)
+            org.opencontainers.image.description=Frontend service for safe-file-generator
+            org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.created=${{ github.event.repository.updated_at }}
+
+      - name: Build and scan frontend
         uses: docker/build-push-action@v6
         with:
           context: .
           file: devops/Dockerfile.frontend
           load: true
           push: false
-          tags: ${{ steps.meta.outputs.tags }}
-          labels: ${{ steps.meta.outputs.labels }}
+          tags: ${{ steps.meta-frontend.outputs.tags }}
+          labels: ${{ steps.meta-frontend.outputs.labels }}
           cache-from: type=registry,ref=${{ env.FRONTEND_IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.FRONTEND_IMAGE }}:buildcache,mode=max
-      - name: Scan with Trivy
+
+      - name: Scan backend image with Trivy
         uses: aquasecurity/trivy-action@master
         with:
-          image-ref: ${{ fromJSON(steps.meta.outputs.tags-json)[0] }}
+          image-ref: ${{ env.BACKEND_IMAGE }}:sha-${{ steps.vars.outputs.sha_short }}
           exit-code: '1'
-          severity: 'HIGH,CRITICAL'
-          format: 'table'
-      - name: Push to Docker Hub
-        run: docker push --all-tags ${{ env.FRONTEND_IMAGE }}
+          severity: HIGH,CRITICAL
 
-  # ── SUMMARY ────────────────────────────────────────────────────────────────
+      - name: Scan frontend image with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE }}:sha-${{ steps.vars.outputs.sha_short }}
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+
+      - name: Push images with SHA + latest tags
+        run: |
+          docker push ${{ env.BACKEND_IMAGE }} --all-tags
+          docker push ${{ env.FRONTEND_IMAGE }} --all-tags
+
+      - name: Semantic Release
+        id: semantic
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npx semantic-release
+
+      - name: Tag and push with semantic version tags
+        if: steps.semantic.outcome == 'success'
+        run: |
+          git fetch origin --tags
+          TAG=$(git tag -l --sort=-version:refname | head -1)
+          if [ -z "$TAG" ]; then
+            echo "No tags found, skipping semver tagging"
+            exit 0
+          fi
+          VERSION=${TAG#v}
+          MAJOR=$(echo "$VERSION" | cut -d. -f1)
+          MINOR=$(echo "$VERSION" | cut -d. -f1-2)
+          SHA_TAG="sha-${{ steps.vars.outputs.sha_short }}"
+
+          for IMAGE in "${{ env.BACKEND_IMAGE }}" "${{ env.FRONTEND_IMAGE }}"; do
+            docker tag "${IMAGE}:${SHA_TAG}" "${IMAGE}:${TAG}"
+            docker tag "${IMAGE}:${SHA_TAG}" "${IMAGE}:${MINOR}"
+            docker tag "${IMAGE}:${SHA_TAG}" "${IMAGE}:${MAJOR}"
+          done
+
+          docker push --all-tags "${{ env.BACKEND_IMAGE }}"
+          docker push --all-tags "${{ env.FRONTEND_IMAGE }}"
+
+      - name: Trigger Render deploy
+        run: curl -X POST ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+
   summary:
     name: CI summary
-    needs: [backend, frontend]
+    needs: [build-and-push]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -135,7 +224,9 @@ jobs:
           echo "" >> $GITHUB_STEP_SUMMARY
           echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
           echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
-          echo "| Test | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Backend Build & Push | ${{ needs.backend.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Frontend Build & Push | ${{ needs.frontend.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Secrets scan | ${{ needs.secrets.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SAST | ${{ needs.sast.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Test & Coverage | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency scan | ${{ needs.sca.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build & Push | ${{ needs.build-and-push.result }} |" >> $GITHUB_STEP_SUMMARY
