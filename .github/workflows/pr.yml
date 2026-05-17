@@ -1,0 +1,155 @@
+name: PR — Test & Scan
+
+on:
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: pr-${{ github.event.number }}
+  cancel-in-progress: true
+
+env:
+  BACKEND_IMAGE: mazeneljaouadi/safe-file-generator
+  FRONTEND_IMAGE: mazeneljaouadi/safe-file-generator-frontend
+
+jobs:
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci --legacy-peer-deps
+      - name: ESLint backend
+        run: npx eslint src/
+      - name: ESLint frontend
+        run: |
+          cd client
+          npm ci --legacy-peer-deps
+          npm run lint
+
+  secrets:
+    name: Secrets scan
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run gitleaks
+        uses: gitleaks/gitleaks-action@v2
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  sast:
+    name: SAST (Semgrep)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run Semgrep
+        uses: semgrep/semgrep-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          config: p/default
+
+  test:
+    name: Tests & coverage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci --legacy-peer-deps
+      - run: npm test
+      - run: npm run test:coverage
+
+  commitlint:
+    name: Commit convention
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci --legacy-peer-deps
+      - name: Lint PR commits
+        run: npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }}
+
+  sca:
+    name: Dependency scan
+    needs: [lint, secrets, sast, test, commitlint]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Scan filesystem with Trivy
+        uses: aquasecurity/trivy-action@master
+        with:
+          scan-type: fs
+          scan-ref: .
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+
+  build:
+    name: Build & scan images
+    needs: [sca]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: docker/setup-buildx-action@v3
+      - name: Build backend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: devops/Dockerfile.backend
+          load: true
+          push: false
+          tags: ${{ env.BACKEND_IMAGE }}:pr-${{ github.event.number }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build frontend
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: devops/Dockerfile.frontend
+          load: true
+          push: false
+          tags: ${{ env.FRONTEND_IMAGE }}:pr-${{ github.event.number }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Scan backend image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.BACKEND_IMAGE }}:pr-${{ github.event.number }}
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+      - name: Scan frontend image
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: ${{ env.FRONTEND_IMAGE }}:pr-${{ github.event.number }}
+          exit-code: '1'
+          severity: HIGH,CRITICAL
+
+  summary:
+    name: PR summary
+    needs: [build]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - run: |
+          echo "## PR CI Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Job | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-----|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Secrets scan | ${{ needs.secrets.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| SAST | ${{ needs.sast.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Test & Coverage | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit convention | ${{ needs.commitlint.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Dependency scan | ${{ needs.sca.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build & Image scan | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY

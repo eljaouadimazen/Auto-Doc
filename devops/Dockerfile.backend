@@ -10,6 +10,10 @@ RUN npm ci --only=production --legacy-peer-deps
 # Production stage
 FROM node:22-alpine
 
+LABEL org.opencontainers.image.title="Safe File Generator (Backend)"
+LABEL org.opencontainers.image.description="Backend service for safe-file-generator"
+LABEL org.opencontainers.image.source="https://github.com/mazeneljaouadi/safe-file-generator"
+
 # Create non-root user for security
 RUN addgroup -S appgroup && adduser -S appuser -G appgroup
 
