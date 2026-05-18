@@ -109,7 +109,7 @@ jobs:
           scan-ref: .
           exit-code: '1'
           severity: HIGH,CRITICAL
-          trivyignores: CVE-2026-33671
+          trivyignores: devops/.trivyignore
 
   build:
     name: Build images
@@ -175,14 +175,14 @@ jobs:
           image-ref: ${{ env.BACKEND_IMAGE }}:pr-${{ github.event.number }}
           exit-code: '1'
           severity: HIGH,CRITICAL
-          trivyignores: CVE-2026-33671
+          trivyignores: devops/.trivyignore
       - name: Scan frontend image
         uses: aquasecurity/trivy-action@master
         with:
           image-ref: ${{ env.FRONTEND_IMAGE }}:pr-${{ github.event.number }}
           exit-code: '1'
           severity: HIGH,CRITICAL
-          trivyignores: CVE-2026-33671
+          trivyignores: devops/.trivyignore
 
   summary:
     name: PR summary
