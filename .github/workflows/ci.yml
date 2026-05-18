@@ -55,8 +55,9 @@ jobs:
         with:
           config: p/default
 
-  test:
-    name: Tests & coverage
+  unit-test:
+    name: Unit tests
+    needs: [sca]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -66,11 +67,23 @@ jobs:
           cache: 'npm'
       - run: npm ci --legacy-peer-deps
       - run: npm test
+
+  coverage:
+    name: Coverage
+    needs: [unit-test]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci --legacy-peer-deps
       - run: npm run test:coverage
 
   sca:
     name: Dependency scan
-    needs: [lint, secrets, sast, test]
+    needs: [lint, secrets, sast]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -82,9 +95,9 @@ jobs:
           exit-code: '1'
           severity: HIGH,CRITICAL
 
-  build-and-push:
-    name: Build, scan, version & push
-    needs: [sca]
+  build:
+    name: Build images
+    needs: [coverage]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -123,7 +136,7 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.created=${{ github.event.repository.updated_at }}
 
-      - name: Build and scan backend
+      - name: Build backend
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -150,7 +163,7 @@ jobs:
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.created=${{ github.event.repository.updated_at }}
 
-      - name: Build and scan frontend
+      - name: Build frontend
         uses: docker/build-push-action@v6
         with:
           context: .
@@ -161,6 +174,49 @@ jobs:
           labels: ${{ steps.meta-frontend.outputs.labels }}
           cache-from: type=registry,ref=${{ env.FRONTEND_IMAGE }}:buildcache
           cache-to: type=registry,ref=${{ env.FRONTEND_IMAGE }}:buildcache,mode=max
+
+      - name: Save backend image
+        run: docker save ${{ env.BACKEND_IMAGE }}:sha-${{ steps.vars.outputs.sha_short }} > /tmp/backend.tar
+
+      - name: Save frontend image
+        run: docker save ${{ env.FRONTEND_IMAGE }}:sha-${{ steps.vars.outputs.sha_short }} > /tmp/frontend.tar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: backend-image
+          path: /tmp/backend.tar
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: frontend-image
+          path: /tmp/frontend.tar
+
+  scan:
+    name: Scan images
+    needs: [build]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Compute short SHA
+        id: vars
+        run: echo "sha_short=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-image
+          path: /tmp/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-image
+          path: /tmp/
+
+      - name: Load backend image
+        run: docker load < /tmp/backend.tar
+
+      - name: Load frontend image
+        run: docker load < /tmp/frontend.tar
 
       - name: Scan backend image with Trivy
         uses: aquasecurity/trivy-action@master
@@ -175,6 +231,47 @@ jobs:
           image-ref: ${{ env.FRONTEND_IMAGE }}:sha-${{ steps.vars.outputs.sha_short }}
           exit-code: '1'
           severity: HIGH,CRITICAL
+
+  push:
+    name: Push & release
+    needs: [scan]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+
+      - run: npm ci --legacy-peer-deps
+
+      - name: Compute short SHA
+        id: vars
+        run: echo "sha_short=${GITHUB_SHA::7}" >> $GITHUB_OUTPUT
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: backend-image
+          path: /tmp/
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: frontend-image
+          path: /tmp/
+
+      - name: Load backend image
+        run: docker load < /tmp/backend.tar
+
+      - name: Load frontend image
+        run: docker load < /tmp/frontend.tar
 
       - name: Push images with SHA + latest tags
         run: |
@@ -215,7 +312,7 @@ jobs:
 
   summary:
     name: CI summary
-    needs: [build-and-push]
+    needs: [lint, secrets, sast, sca, unit-test, coverage, build, scan, push]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -227,6 +324,9 @@ jobs:
           echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Secrets scan | ${{ needs.secrets.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| SAST | ${{ needs.sast.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Test & Coverage | ${{ needs.test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Dependency scan | ${{ needs.sca.result }} |" >> $GITHUB_STEP_SUMMARY
-          echo "| Build & Push | ${{ needs.build-and-push.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Unit tests | ${{ needs.unit-test.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Coverage | ${{ needs.coverage.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Build images | ${{ needs.build.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Scan images | ${{ needs.scan.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Push & release | ${{ needs.push.result }} |" >> $GITHUB_STEP_SUMMARY
