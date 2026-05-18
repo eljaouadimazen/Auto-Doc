@@ -1,10 +1,10 @@
 {
-  "generatedAt": "2026-05-12T16:16:24.328Z",
+  "generatedAt": "2026-05-18T14:23:18.128Z",
   "repository": "https://github.com/eljaouadimazen/Auto-Doc",
   "repoName": "Auto-Doc",
   "mode": "agentic",
   "provider": "groq",
-  "filesAnalyzed": 77,
+  "filesAnalyzed": 80,
   "totalRedacted": 231,
   "stats": {
     "filesAnalyzed": 10,

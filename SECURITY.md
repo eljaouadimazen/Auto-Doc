@@ -3,7 +3,7 @@
 ## Summary
 | Metric | Value |
 |---|---|
-| Files Scanned | 77 |
+| Files Scanned | 80 |
 | Files with Secrets | 25 |
 | Total Redactions | 231 |
 
