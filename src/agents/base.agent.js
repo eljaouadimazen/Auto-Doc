@@ -43,8 +43,8 @@ class BaseAgent {
     this.maxTokens    = options.maxTokens   ?? 2048;
     this.provider     = options.provider    || 'groq';
 
-    // Default LLM instance (uses .env keys)
-    this.llm = BaseAgent._createLlm(this.provider, null, this.temperature, this.maxTokens);
+    // Lazily-initialized LLM instance (created on first callLLM call)
+    this.llm = null;
 
     // Per-request state (set by run() from context)
     this._currentApiKey  = null;
@@ -195,6 +195,9 @@ class BaseAgent {
       return response.content;
     }
 
+    if (!this.llm) {
+      this.llm = BaseAgent._createLlm(this.provider, null, this.temperature, this.maxTokens);
+    }
     const response = await this.llm.invoke(messages);
     return response.content;
   }
