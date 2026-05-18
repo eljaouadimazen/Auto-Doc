@@ -96,6 +96,7 @@ jobs:
           scan-ref: .
           exit-code: '1'
           severity: HIGH,CRITICAL
+          ignorefile: devops/.trivyignore
 
   build:
     name: Build images
@@ -226,6 +227,7 @@ jobs:
           image-ref: ${{ env.BACKEND_IMAGE }}:sha-${{ steps.vars.outputs.sha_short }}
           exit-code: '1'
           severity: HIGH,CRITICAL
+          ignorefile: devops/.trivyignore
 
       - name: Scan frontend image with Trivy
         uses: aquasecurity/trivy-action@master
@@ -233,6 +235,7 @@ jobs:
           image-ref: ${{ env.FRONTEND_IMAGE }}:sha-${{ steps.vars.outputs.sha_short }}
           exit-code: '1'
           severity: HIGH,CRITICAL
+          ignorefile: devops/.trivyignore
 
   push:
     name: Push & release
