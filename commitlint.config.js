@@ -3,7 +3,7 @@ module.exports = {
     {
       rules: {
         'commit-format': (parsed) => {
-          const types = ['feature', 'bugfix', 'hotfix', 'design', 'refactor', 'test', 'doc'];
+          const types = ['feature', 'bugfix', 'hotfix', 'design', 'refactor', 'test', 'doc', 'chore'];
           const pattern = new RegExp(`^(${types.join('|')})\\/: .+$`, 'm');
           const valid = pattern.test(parsed.raw);
           return [valid, `Format must be: type/: description (types: ${types.join(', ')})`];

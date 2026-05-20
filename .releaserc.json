@@ -3,7 +3,7 @@
   "plugins": [
     ["@semantic-release/commit-analyzer", {
       "parserOpts": {
-        "headerPattern": "^(feature|bugfix|hotfix|design|refactor|test|doc)\\/: (.*)$",
+        "headerPattern": "^(feature|bugfix|hotfix|design|refactor|test|doc|chore)\\/:? ?(.*)$",
         "headerCorrespondence": ["type", "subject"]
       },
       "releaseRules": [
@@ -13,12 +13,13 @@
         {"type": "refactor", "release": "patch"},
         {"type": "design", "release": false},
         {"type": "test", "release": false},
-        {"type": "doc", "release": false}
+        {"type": "doc", "release": false},
+        {"type": "chore", "release": false}
       ]
     }],
     ["@semantic-release/release-notes-generator", {
       "parserOpts": {
-        "headerPattern": "^(feature|bugfix|hotfix|design|refactor|test|doc)\\/: (.*)$",
+        "headerPattern": "^(feature|bugfix|hotfix|design|refactor|test|doc|chore)\\/:? ?(.*)$",
         "headerCorrespondence": ["type", "subject"]
       }
     }],
