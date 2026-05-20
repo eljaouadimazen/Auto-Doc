@@ -10,8 +10,7 @@
     "test:coverage": "jest --coverage",
     "lint": "eslint src/",
     "lint:client": "cd client && npm run lint",
-    "prepare": "husky",
-    "generate:ci": "node scripts/generate-docs-ci.js"
+    "prepare": "husky"
   },
   "dependencies": {
     "@google-cloud/aiplatform": "^6.4.0",

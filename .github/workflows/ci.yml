@@ -3,6 +3,8 @@ name: CI — Test, Scan, Version & Push
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
@@ -57,6 +59,26 @@ jobs:
         with:
           config: p/default
 
+  commitlint:
+    name: Commit convention
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: 'npm'
+      - run: npm ci --legacy-peer-deps
+      - name: Lint commits
+        run: |
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            npx commitlint --from ${{ github.event.pull_request.base.sha }} --to ${{ github.event.pull_request.head.sha }}
+          else
+            npx commitlint --from ${{ github.event.before }} --to ${{ github.sha }}
+          fi
+
   unit-test:
     name: Unit tests
     needs: [sca]
@@ -85,7 +107,7 @@ jobs:
 
   sca:
     name: Dependency scan
-    needs: [lint, secrets, sast]
+    needs: [lint, secrets, sast, commitlint]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -239,6 +261,7 @@ jobs:
 
   push:
     name: Push & release
+    if: github.event_name == 'push'
     needs: [scan]
     runs-on: ubuntu-latest
     steps:
@@ -317,7 +340,7 @@ jobs:
 
   summary:
     name: CI summary
-    needs: [lint, secrets, sast, sca, unit-test, coverage, build, scan, push]
+    needs: [lint, secrets, sast, commitlint, sca, unit-test, coverage, build, scan, push]
     if: always()
     runs-on: ubuntu-latest
     steps:
@@ -329,6 +352,7 @@ jobs:
           echo "| Lint | ${{ needs.lint.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Secrets scan | ${{ needs.secrets.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| SAST | ${{ needs.sast.result }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Commit convention | ${{ needs.commitlint.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Dependency scan | ${{ needs.sca.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Unit tests | ${{ needs.unit-test.result }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Coverage | ${{ needs.coverage.result }} |" >> $GITHUB_STEP_SUMMARY
