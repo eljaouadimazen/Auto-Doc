@@ -5,7 +5,7 @@ const AuditLog = require('./audit-log.model');
 const Documentation = require('./documentation.model');
 const { sanitizeLog } = require('../services/log-sanitizer');
 
-const EnforcedOrchestrator = require('../agents/enforced-orchestrator.agent');
+const EnforcedOrchestrator = require('../agents/orchestrator.agent');
 const protocol = require('../agents/protocol');
 const llmService = require('../services/llm.service');
 const llmInputBuilder = require('../services/llm-input-builder.service');

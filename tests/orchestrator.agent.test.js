@@ -1,4 +1,4 @@
-const EnforcedOrchestrator = require('../src/agents/enforced-orchestrator.agent');
+const EnforcedOrchestrator = require('../src/agents/orchestrator.agent');
 
 describe('EnforcedOrchestrator', () => {
   let orchestrator;

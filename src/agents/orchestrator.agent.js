@@ -1,5 +1,5 @@
 /**
- * enforced-orchestrator.agent.js
+ * orchestrator.agent.js
  */
 
 const BaseAgent               = require('./base.agent');
