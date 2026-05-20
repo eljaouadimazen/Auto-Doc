@@ -123,17 +123,6 @@ npm start                      # serves static frontend + API on port 3000
 
 ---
 
-### Running the CI pipeline headlessly
-
-To generate documentation without the web interface (used by GitHub Actions):
-
-```bash
-# Make sure GROQ_API_KEY and REPO_URL are set in .env
-npm run generate:ci
-```
-
-Output is written to the `docs/` folder.
-
 ---
 
 ## API Endpoints

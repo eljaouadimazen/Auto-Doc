@@ -37,32 +37,16 @@ Step 3: Generate Documentation
 
 ## Automated Pipeline (CI/CD)
 
-Triggered automatically on push to `main`, `master`, or `dev` when `src/**` or `package.json` changes.
+Triggered on push to `main` or pull request to `main`. Runs lint, security scans, unit tests, Docker build/scan, and (on push only) Docker push + release.
 
-```
-Git push to dev/main
+```text
+Push/PR to main
     ↓
-Layer 1: GitHub path filter
-    Did src/**, package.json, or package-lock.json change?
-    NO  → pipeline never starts
-    YES → continue
-
-Layer 2: Semantic diff (scripts/semantic-diff.js)
-    For each changed .js/.ts/.jsx/.tsx/.mjs/.py file:
-        Parse AST signature BEFORE (git show baseSHA:file)
-        Parse AST signature AFTER (current file)
-        Compare: classes, methods, routes, imports, env vars, exports
+Lint → Secrets scan → SAST → Commitlint → Dependency scan → Unit tests → Coverage
     ↓
-    Only internal logic changed → SKIP (docs still accurate)
-    Structural change detected  → GENERATE
-
-Documentation generation (scripts/generate-docs-ci.js)
-    fetch → sanitize → audit → AST build → Groq LLM
-    Writes to docs/: README.md, index.html, SECURITY.md, pipeline-meta.json
-
-Deploy to GitHub Pages
-    peaceiris/actions-gh-pages pushes docs/ to gh-pages branch
-    Live at: https://eljaouadimazen.github.io/Auto-Doc/
+Build Docker images → Scan images
+    ↓
+[Push to main only] Push & release → Render deploy
 ```
 
 ---

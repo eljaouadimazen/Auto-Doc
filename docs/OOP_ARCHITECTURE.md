@@ -197,9 +197,7 @@ Files are serialized using **sentinel delimiters** (`<<<CONTENT>>>` / `<<<END>>>
 ## File: src/config.js
 <<<CONTENT>>>
 const AWS_KEY = "AKIA1234567890ABCDEF";
------BEGIN RSA PRIVATE KEY-----
-MIIEowIBAAKCAQEA...
------END RSA PRIVATE KEY-----
+// FAKE_PRIVATE_KEY_EXAMPLE
 <<<END>>>
 
 ## File: package.json
@@ -492,7 +490,7 @@ Only `EnforcedOrchestrator` exists (see Section 5.2). The old 5-phase `Orchestra
 
 ---
 
-### 5.2 `EnforcedOrchestrator` — `src/agents/enforced-orchestrator.agent.js`
+### 5.2 `EnforcedOrchestrator` — `src/agents/orchestrator.agent.js`
 
 A **certified 7-stage pipeline** designed to prevent hallucinated documentation and generate architectural diagrams.
 
@@ -710,7 +708,7 @@ safe-file-generator/
 │   ├── agents/                             ← Multi-Agent System (9 files)
 │   │   ├── base.agent.js                   ← Abstract base (LLM, retry, tracing, 4 providers)
 │   │   ├── protocol.js                     ← AgentInput/AgentOutput contract
-│   │   ├── enforced-orchestrator.agent.js  ← ONLY orchestrator (7-stage certified pipeline)
+│   │   ├── orchestrator.agent.js            ← ONLY orchestrator (7-stage certified pipeline)
 │   │   ├── code-intelligence.agent.js      ← LLM-powered code understanding
 │   │   ├── security.agent.js               ← Semantic secret detection
 │   │   ├── writer.agent.js                 ← Documentation generation
@@ -766,7 +764,7 @@ safe-file-generator/
 - `src/services/github.service.js` — GitHub fetching is in `repository.model.js`
 - `src/services/audit-log.service.js` — Audit log is a model, not service
 - `src/services/fingerprint.service.js` — Absorbed by `repo-analyzer.agent.js`
-- `src/agents/orchestrator.agent.js` — Only `enforced-orchestrator.agent.js` exists
+- ~~`src/agents/orchestrator.agent.js`~~ — Renamed from `enforced-orchestrator.agent.js`
 - `src/agents/architecture.agent.js` — Never implemented
 
 ---
