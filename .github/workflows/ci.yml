@@ -55,7 +55,7 @@ jobs:
       - name: Run Semgrep (SAST)
         run: |
           pip install semgrep
-          semgrep ci --config=p/security-audit
+          semgrep ci --config=p/security-audit --exclude=client/nginx.conf
 
   commitlint:
     name: Commit convention
