@@ -52,10 +52,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Run Semgrep
-        uses: semgrep/semgrep-action@v2
-        with:
-          config: p/default
+      - name: Run Semgrep (SAST)
+        run: |
+          pip install semgrep
+          semgrep ci --config=p/default
 
   commitlint:
     name: Commit convention
