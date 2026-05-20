@@ -1,0 +1,14 @@
+# Docs contain example/fake credentials for demonstration
+docs/
+
+# Pre-built HTML / third-party assets
+public/
+client/index.html
+client/nginx.conf
+
+# Intentional by design: dynamic regex patterns
+src/models/sanitization-rule.model.js
+src/services/sanitizer.service.js
+
+# Local-only endpoint (Ollama on localhost, never exposed)
+src/services/llm.service.js

@@ -196,7 +196,7 @@ Files are serialized using **sentinel delimiters** (`<<<CONTENT>>>` / `<<<END>>>
 ```
 ## File: src/config.js
 <<<CONTENT>>>
-const AWS_KEY = "AKIA1234567890ABCDEF";
+const AWS_KEY = "FAKE_AWS_KEY_EXAMPLE";
 // FAKE_PRIVATE_KEY_EXAMPLE
 <<<END>>>
 
@@ -566,9 +566,9 @@ The `SanitizerService` combines **34 built-in regex patterns** with a **Shannon 
 Instead of destructive `[REDACTED_SECRET]` replacement, the sanitizer uses a vault (`Map<token, originalValue>`):
 
 ```
-Input:  AWS_KEY=AKIA1234567890ABCDEF
+Input:  AWS_KEY=FAKE_AWS_KEY_EXAMPLE
 Output: AWS_KEY=[TOKEN_AWS_KEY_a7b2]
-Vault:  { "[TOKEN_AWS_KEY_a7b2]" → "AKIA1234567890ABCDEF" }
+Vault:  { "[TOKEN_AWS_KEY_a7b2]" → "FAKE_AWS_KEY_EXAMPLE" }
 ```
 
 - The LLM receives context-rich tokens it can reason about
