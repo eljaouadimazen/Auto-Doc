@@ -14,6 +14,7 @@ export default defineConfig({
       '/audit':        'http://localhost:3000',
       '/rules':        'http://localhost:3000',
       '/health':       'http://localhost:3000',
+      '/publish':      'http://localhost:3000',
     }
   },
   build: {

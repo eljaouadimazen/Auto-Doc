@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
+import DocViewer from './components/DocViewer'
 import './App.css'
 
 function Navbar() {
@@ -34,7 +35,10 @@ function Pipeline() {
   const [provider, setProvider] = useState('groq')
   const [pipelineMode, setPipelineMode] = useState('agentic')
   const [sessionId, setSessionId] = useState(null)
-
+  const [githubPublishToken, setGithubPublishToken] = useState('')
+  const [targetRepo, setTargetRepo] = useState('')
+  const [publishStatus, setPublishStatus] = useState(null)
+  const [publishUrl, setPublishUrl] = useState('')
   const keyTimer = useRef(null)
   const renderedRef = useRef(null)
 
@@ -100,10 +104,16 @@ function Pipeline() {
       // Run mermaid on all unprocessed .mermaid divs
       const mermaidDivs = renderedRef.current.querySelectorAll('.mermaid:not([data-processed])')
       if (mermaidDivs.length > 0) {
-        try {
-          await mermaid.run({ nodes: mermaidDivs })
-        } catch (err) {
-          console.warn('Mermaid render error:', err)
+        for (const div of mermaidDivs) {
+          try {
+            await mermaid.run({ nodes: [div] })
+          } catch (err) {
+            console.warn('Mermaid render error:', err)
+            const container = div.parentNode
+            if (container) {
+              container.innerHTML = '<div style="padding:12px;color:#ef4444;font-size:13px;font-family:monospace;text-align:center">⚠ ' + (err.message || 'Diagram syntax error') + '</div>'
+            }
+          }
         }
       }
     }, 100)
@@ -124,6 +134,8 @@ function Pipeline() {
 
     updateLoading('fetch', 'Fetching repository...')
     setOutput('Fetching...')
+    setPublishStatus(null)
+    setPublishUrl('')
     setStates({ fetch: false, build: false, generate: false })
     setMessages(null)
     setSessionId(null)
@@ -142,6 +154,7 @@ function Pipeline() {
       setRawMarkdown(data.rawMarkdown)
       setFetchedFiles(data.files)
       setRepoName(data.repoName)
+      setTargetRepo(data.repoName || '')
       setOutput(`✓ FETCH COMPLETE\n\nSize: ${data.size} chars\n\n--- PREVIEW ---\n\n${data.preview}`)
       setStates(s => ({ ...s, fetch: true }))
       setMode('')
@@ -226,6 +239,37 @@ function Pipeline() {
       setOutput('Generation failed.')
     } finally {
       updateLoading(null)
+    }
+  }
+
+  const publishDocs = async () => {
+    const token = githubPublishToken.trim()
+    const repo = targetRepo.trim()
+    if (!repo || !repo.includes('/')) { setError('Enter a valid target repo (owner/repo)'); return }
+    if (!token) { setError('Enter a GitHub token with repo scope'); return }
+
+    setPublishStatus('publishing')
+    setPublishUrl('')
+
+    try {
+      const res = await fetch('/publish', {
+        method: 'POST',
+        headers: authHeaders(),
+        body: JSON.stringify({
+          documentation: output,
+          repoName,
+          targetRepo: repo,
+          githubToken: token
+        })
+      })
+      const data = await res.json()
+      if (!res.ok) throw new Error(data.error || 'Publish failed')
+
+      setPublishStatus('success')
+      setPublishUrl(data.url)
+    } catch (err) {
+      setPublishStatus('error')
+      setPublishUrl(err.message)
     }
   }
 
@@ -467,9 +511,21 @@ function Pipeline() {
                 className={`text-xs px-3 py-1.5 rounded-lg font-mono ${tab === 'rendered' ? 'bg-near-black text-cream' : 'bg-light-sand text-warm-gray'}`}>
                 Rendered
               </button>
+              {states.generate && (
+                <button onClick={() => setTab('interactive')}
+                  className={`text-xs px-3 py-1.5 rounded-lg font-mono ${tab === 'interactive' ? 'bg-orange text-cream' : 'bg-light-sand text-warm-gray'}`}>
+                  Interactive
+                </button>
+              )}
             </div>
 
-            {tab === 'raw' ? (
+            {tab === 'interactive' ? (
+              <DocViewer
+                markdown={output}
+                repoName={repoName || targetRepo}
+                onClose={() => setTab('rendered')}
+              />
+            ) : tab === 'raw' ? (
               <pre className="bg-off-white border border-sand text-near-black p-4 rounded-xl overflow-auto h-96 text-xs leading-relaxed font-mono">
                 {output}
               </pre>
@@ -489,6 +545,77 @@ function Pipeline() {
               <span className="text-sand">→</span>
               <span className={stateClass('generate')}>● generate</span>
             </div>
+
+            {/* Publish to GitHub Pages */}
+            {states.generate && (
+              <div className="publish-card">
+                <div className="publish-header">
+                  <span>📦</span>
+                  <h3>Publish to GitHub Pages</h3>
+                </div>
+
+                <div className="publish-field">
+                  <label>Target Repository</label>
+                  <input
+                    type="text"
+                    value={targetRepo}
+                    onChange={e => setTargetRepo(e.target.value)}
+                    placeholder="owner/repo"
+                  />
+                </div>
+
+                <div className="publish-field">
+                  <label>GitHub Token (repo scope)</label>
+                  <input
+                    type="password"
+                    value={githubPublishToken}
+                    onChange={e => setGithubPublishToken(e.target.value)}
+                    placeholder="ghp_..."
+                  />
+                  <div className="text-xs text-warm-gray mt-1 font-mono">
+                    Generate at{' '}
+                    <a href="https://github.com/settings/tokens" target="_blank"
+                      className="text-orange underline">
+                      github.com/settings/tokens
+                    </a>
+                    {' '}— needs <code>repo</code> scope
+                  </div>
+                </div>
+
+                <div className="publish-actions">
+                  <button
+                    onClick={() => setTab('interactive')}
+                    className="publish-btn publish-btn-secondary">
+                    Preview Viewer
+                  </button>
+                  <button
+                    onClick={publishDocs}
+                    disabled={publishStatus === 'publishing'}
+                    className="publish-btn publish-btn-primary">
+                    {publishStatus === 'publishing' ? 'Publishing...' : '🚀 Publish to Pages'}
+                  </button>
+                </div>
+
+                {publishStatus === 'publishing' && (
+                  <div className="publish-status publish-status-publishing">
+                    Publishing to GitHub Pages...
+                  </div>
+                )}
+                {publishStatus === 'success' && (
+                  <div className="publish-status publish-status-success">
+                    ✓ Published!<br />
+                    <a href={publishUrl} target="_blank" className="publish-url">
+                      {publishUrl}
+                    </a>
+                  </div>
+                )}
+                {publishStatus === 'error' && (
+                  <div className="publish-status publish-status-error">
+                    ✗ Publish failed: {publishUrl}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
         </div>
       </section>
