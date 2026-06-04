@@ -39,6 +39,7 @@ function Pipeline() {
   const [targetRepo, setTargetRepo] = useState('')
   const [publishStatus, setPublishStatus] = useState(null)
   const [publishUrl, setPublishUrl] = useState('')
+  const [publishError, setPublishError] = useState('')
   const keyTimer = useRef(null)
   const renderedRef = useRef(null)
 
@@ -136,6 +137,7 @@ function Pipeline() {
     setOutput('Fetching...')
     setPublishStatus(null)
     setPublishUrl('')
+    setPublishError('')
     setStates({ fetch: false, build: false, generate: false })
     setMessages(null)
     setSessionId(null)
@@ -245,11 +247,12 @@ function Pipeline() {
   const publishDocs = async () => {
     const token = githubPublishToken.trim()
     const repo = targetRepo.trim()
-    if (!repo || !repo.includes('/')) { setError('Enter a valid target repo (owner/repo)'); return }
-    if (!token) { setError('Enter a GitHub token with repo scope'); return }
+    if (!repo || !repo.includes('/')) { setPublishError('Enter a valid target repo (owner/repo)'); return }
+    if (!token) { setPublishError('Enter a GitHub token with repo scope'); return }
 
     setPublishStatus('publishing')
     setPublishUrl('')
+    setPublishError('')
 
     try {
       const res = await fetch('/publish', {
@@ -596,6 +599,11 @@ function Pipeline() {
                   </button>
                 </div>
 
+                {publishError && (
+                  <div className="publish-status publish-status-error">
+                    ✗ {publishError}
+                  </div>
+                )}
                 {publishStatus === 'publishing' && (
                   <div className="publish-status publish-status-publishing">
                     Publishing to GitHub Pages...

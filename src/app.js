@@ -38,6 +38,9 @@ app.get('/health', (req, res) => res.json({ status: 'ok', version: '1.0.0' }));
 // ── Key Validation ────────────────────────────────────────────────
 app.post('/validate-key', rateLimiter.defaultLimit, (req, res) => generatorController.validateKey(req, res));
 
+// ── Publish Route ─────────────────────────────────────────────────
+app.post('/publish', rateLimiter.defaultLimit, (req, res) => generatorController.publishDocs(req, res));
+
 // ── Audit Routes ──────────────────────────────────────────────────
 app.get('/audit', rateLimiter.defaultLimit, (req, res) => generatorController.getAuditLogs(req, res));
 
