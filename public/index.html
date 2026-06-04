@@ -8,9 +8,9 @@
   <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
 
   <!-- Mermaid for diagram rendering — startOnLoad:false so React controls when it runs -->
-  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@11.15.0/dist/mermaid.min.js"></script>
   <script>
-    mermaid.initialize({ startOnLoad: false, theme: 'neutral', securityLevel: 'loose' });
+    mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
   </script>
 
   <style>
@@ -23,7 +23,7 @@
 
     /* Mermaid diagram styling inside rendered output */
     .rendered-output .mermaid {
-      background: white;
+      background: #1e293b;
       border: 1px solid var(--sand);
       border-radius: 0.75rem;
       padding: 1.5rem;

@@ -10,6 +10,7 @@
     "test:coverage": "jest --coverage",
     "lint": "eslint src/",
     "lint:client": "cd client && npm run lint",
+    "deploy-docs": "node scripts/deploy-docs.js",
     "prepare": "husky"
   },
   "dependencies": {

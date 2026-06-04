@@ -68,11 +68,12 @@ You never invent components. If something is unclear, you omit it rather than gu
       explanation
     );
 
-    // ── Clean and validate output ────────────────────────────────────────
+    // ── Clean, sanitize, and validate output ─────────────────────────────
     const cleanMermaid = this._extractMermaid(rawMermaid);
-    this._validate(cleanMermaid, diagramType);
+    const sanitized = this._sanitizeMermaid(cleanMermaid, diagramType);
+    this._validate(sanitized, diagramType);
 
-    return cleanMermaid;
+    return sanitized;
   }
 
   // ── Pass 1: Explain ─────────────────────────────────────────────────────
@@ -199,6 +200,30 @@ Generate the Mermaid diagram now:`;
     return this.callLLM(prompt);
   }
 
+  /**
+   * Sanitize generated Mermaid code to fix common LLM-generated syntax issues
+   * before it reaches the renderer.
+   */
+  _sanitizeMermaid(code, diagramType) {
+    if (!code || typeof code !== 'string') return code;
+
+    let sanitized = code.trim();
+
+    if (diagramType === 'CLASS' || sanitized.startsWith('classDiagram')) {
+      // Angle brackets <> inside class bodies break Mermaid's parser.
+      // Replace them with square brackets [] to preserve type info.
+      sanitized = sanitized.replace(/<([^>]*)>/g, '[$1]');
+    }
+
+    // Strip trailing whitespace on every line
+    sanitized = sanitized.replace(/[ \t]+$/gm, '');
+
+    // Collapse runs of 3+ blank lines to 2 (keep paragraph separation valid)
+    sanitized = sanitized.replace(/\n{3,}/g, '\n\n');
+
+    return sanitized;
+  }
+
   // ── Helpers ─────────────────────────────────────────────────────────────
 
   /**
@@ -244,6 +269,16 @@ Generate the Mermaid diagram now:`;
       throw new Error(
         `DiagramAgent output does not contain expected keyword for ${diagramType}. ` +
         `Got: ${mermaid.slice(0, 80)}`
+      );
+    }
+
+    // Check for remaining angle brackets (should have been caught by sanitize,
+    // but check anyway in case a new diagram type is added later)
+    const angleBracketCount = (mermaid.match(/<[^>]*(?:>|$)/g) || []).length;
+    if (angleBracketCount > 2) {
+      throw new Error(
+        `DiagramAgent output contains ${angleBracketCount} angle brackets which break the Mermaid parser. ` +
+        `First 120 chars: ${mermaid.slice(0, 120)}`
       );
     }
   }

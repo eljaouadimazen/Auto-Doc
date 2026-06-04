@@ -1,5 +1,7 @@
 const fs = require('fs');
 const path = require('path');
+const ViewerGeneratorService = require('../services/viewer-generator.service');
+const PublisherService = require('../services/publisher.service');
 
 class Documentation {
   #content;
@@ -21,16 +23,24 @@ class Documentation {
     if (!fs.existsSync(pubDir)) {
       fs.mkdirSync(pubDir, { recursive: true });
     }
-    const fileName = `${repoName}_docs_${this.#generatedAt.getTime()}.md`;
+    const fileName = `${repoName}_docs_${this.#generatedAt.getTime()}.html`;
     const fullPath = path.join(pubDir, fileName);
-    fs.writeFileSync(fullPath, this.#content, 'utf8');
+    const html = ViewerGeneratorService.generateViewerHtml(
+      this.#content,
+      repoName,
+      { ...this.#stats, generatedAt: this.#generatedAt.toISOString() }
+    );
+    fs.writeFileSync(fullPath, html, 'utf8');
     return `/docs/${fileName}`;
   }
 
-  PublishToPages() {
-    // Placeholder logic for deploying documentation directly to GitHub Pages
-    console.info('[Documentation] Publishing to GitHub Pages...');
-    return true;
+  async PublishToPages(targetRepo, githubToken, repoName) {
+    return await PublisherService.publishToGitHubPages(
+      { content: this.#content, stats: { ...this.#stats, generatedAt: this.#generatedAt.toISOString() } },
+      targetRepo,
+      githubToken,
+      repoName
+    );
   }
 }
 module.exports = Documentation;

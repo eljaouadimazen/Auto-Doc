@@ -1,5 +1,6 @@
 const User             = require('../models/user.model');
 const Repository       = require('../models/repository.model');
+const Documentation    = require('../models/documentation.model');
 const llmInputBuilder  = require('../services/llm-input-builder.service');
 const llmService       = require('../services/llm.service');
 const sanitizerService = require('../services/sanitizer.service');
@@ -220,6 +221,37 @@ class GeneratorController {
     } catch (err) {
       console.error('[generateDocs]', sanitizeLog(err.message));
       res.status(500).json({ error: err.message });
+    }
+  }
+
+  // --- PUBLISH TO GITHUB PAGES ---
+  async publishDocs(req, res) {
+    try {
+      const { documentation, repoName, targetRepo, githubToken } = req.body;
+
+      if (!documentation) {
+        return res.status(400).json({ error: 'No documentation content provided' });
+      }
+      if (!targetRepo || !targetRepo.includes('/')) {
+        return res.status(400).json({
+          error: 'Target repository required — use format "owner/repo"'
+        });
+      }
+
+      const token = githubToken || process.env.GITHUB_TOKEN;
+      if (!token) {
+        return res.status(400).json({
+          error: 'GitHub token required. Provide one in the request body or set GITHUB_TOKEN in server environment.'
+        });
+      }
+
+      const doc = new Documentation(documentation, {});
+      const result = await doc.PublishToPages(targetRepo, token, repoName || targetRepo);
+
+      return res.json(result);
+    } catch (err) {
+      console.error('[publishDocs]', sanitizeLog(err.message));
+      return res.status(500).json({ error: err.message });
     }
   }
 
