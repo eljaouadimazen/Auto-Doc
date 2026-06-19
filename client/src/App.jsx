@@ -1,5 +1,6 @@
 import { useState, useRef, useEffect } from 'react'
 import DocViewer from './components/DocViewer'
+import AuditPanel from './components/AuditPanel'
 import './App.css'
 
 function Navbar() {
@@ -29,17 +30,21 @@ function Pipeline() {
   const [output, setOutput] = useState('Ready. Paste a GitHub URL and click Fetch Repo.')
   const [tab, setTab] = useState('raw')
   const [mode, setMode] = useState('')
-  const [states, setStates] = useState({ fetch: false, build: false, generate: false })
+  const [states, setStates] = useState({ fetch: false, build: false, nature: false, generate: false })
   const [fetchedFiles, setFetchedFiles] = useState(null)
   const [repoName, setRepoName] = useState('')
   const [provider, setProvider] = useState('groq')
   const [pipelineMode, setPipelineMode] = useState('agentic')
   const [sessionId, setSessionId] = useState(null)
+  const [projectNature, setProjectNature] = useState(null)
   const [githubPublishToken, setGithubPublishToken] = useState('')
   const [targetRepo, setTargetRepo] = useState('')
   const [publishStatus, setPublishStatus] = useState(null)
   const [publishUrl, setPublishUrl] = useState('')
   const [publishError, setPublishError] = useState('')
+  const [wordWrap, setWordWrap] = useState(false)
+  const [copyText, setCopyText] = useState('Copy')
+  const [auditSummary, setAuditSummary] = useState(null)
   const keyTimer = useRef(null)
   const renderedRef = useRef(null)
 
@@ -138,11 +143,12 @@ function Pipeline() {
     setPublishStatus(null)
     setPublishUrl('')
     setPublishError('')
-    setStates({ fetch: false, build: false, generate: false })
+    setStates({ fetch: false, build: false, nature: false, generate: false })
     setMessages(null)
     setSessionId(null)
     setFetchedFiles(null)
     setRepoName('')
+    setProjectNature(null)
 
     try {
       const res = await fetch('/fetch', {
@@ -157,6 +163,7 @@ function Pipeline() {
       setFetchedFiles(data.files)
       setRepoName(data.repoName)
       setTargetRepo(data.repoName || '')
+      setAuditSummary(data.auditSummary || null)
       setOutput(`✓ FETCH COMPLETE\n\nSize: ${data.size} chars\n\n--- PREVIEW ---\n\n${data.preview}`)
       setStates(s => ({ ...s, fetch: true }))
       setMode('')
@@ -186,6 +193,7 @@ function Pipeline() {
       setMessages(data.chunks || data.messages)
       setMode(data.mode)
       setSessionId(data.sessionId || null)
+      setAuditSummary(data.auditSummary || null)
 
       let summary = `✓ BUILD COMPLETE [mode: ${data.mode}]`
       if (data.auditSummary) {
@@ -205,6 +213,16 @@ function Pipeline() {
     }
   }
 
+  const NATURE_OPTIONS = [
+    { value: 'BACKEND', label: 'Backend', icon: '⚙️', desc: 'Server-side APIs, microservices, CLI tools' },
+    { value: 'FRONTEND', label: 'Frontend', icon: '🎨', desc: 'Web UI, React/Vue/Angular applications' },
+    { value: 'FULLSTACK', label: 'Fullstack', icon: '🏗️', desc: 'Combined frontend + backend' },
+    { value: 'MOBILE', label: 'Mobile', icon: '📱', desc: 'Mobile/React Native/Flutter apps' },
+    { value: 'DEVOPS', label: 'DevOps', icon: '🐳', desc: 'Infrastructure, CI/CD, Docker/K8s' },
+    { value: 'LIBRARY', label: 'Library', icon: '📦', desc: 'npm packages, SDKs, shared utilities' },
+    { value: 'RESOURCE_LIST', label: 'Resource List', icon: '📋', desc: 'Config files, docs, non-code repos' },
+  ]
+
   const generateDocs = async () => {
     if (pipelineMode === 'agentic') {
       if (!fetchedFiles) { setError('Run Fetch Repo first'); return }
@@ -218,7 +236,11 @@ function Pipeline() {
     try {
       let body = {}
       if (pipelineMode === 'agentic') {
-        body = { files: fetchedFiles, repoName }
+        body = {
+          files: fetchedFiles,
+          repoName,
+          projectNature
+        }
       } else if (Array.isArray(messages)) {
         body = { chunks: messages, sessionId }
       } else {
@@ -276,11 +298,27 @@ function Pipeline() {
     }
   }
 
+  const copyToClipboard = async () => {
+    try {
+      await navigator.clipboard.writeText(output)
+      setCopyText('Copied!')
+      setTimeout(() => setCopyText('Copy'), 2000)
+    } catch { setCopyText('Failed') }
+  }
+
+  const downloadOutput = () => {
+    const blob = new Blob([output], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url; a.download = `${repoName || 'docs'}.md`
+    a.click(); URL.revokeObjectURL(url)
+  }
+
   const toggleAST = () => {
     setUseAST(!useAST)
     setMessages(null)
     setSessionId(null)
-    setStates(s => ({ ...s, build: false, generate: false }))
+    setStates(s => ({ ...s, build: false, nature: false, generate: false }))
   }
 
   const renderMarkdown = (text) => {
@@ -293,6 +331,21 @@ function Pipeline() {
   }
 
   const stateClass = (step) => states[step] ? 'state-done' : 'state-pending'
+
+  const getStepState = (stepId) => {
+    if (loadingStep === stepId) return 'active'
+    if (states[stepId]) return 'done'
+    if (stepId === 'fetch') return 'available'
+    if (stepId === 'build' && !states.fetch) return 'pending'
+    if (stepId === 'generate' && (!states.build || !states.nature)) return 'pending'
+    return 'available'
+  }
+
+  const STEPS = [
+    { id: 'fetch', label: 'Fetch & Sanitize', emoji: '⬇️', desc: 'Clone, sanitize & audit secrets' },
+    { id: 'build', label: 'Build LLM Input', emoji: '🔨', desc: 'Parse AST & build context' },
+    { id: 'generate', label: 'Generate Docs', emoji: '📄', desc: 'Generate documentation' },
+  ]
 
   const getKeyBadgeClass = () => {
     if (keyStatus === 'not set') return 'key-badge key-not-set'
@@ -459,38 +512,113 @@ function Pipeline() {
               </div>
             </div>
 
-            {/* Steps */}
-            <div className="grid grid-cols-3 gap-3 mb-6">
-              {[
-                { id: 'fetch', label: 'Fetch & Sanitize', icon: '1' },
-                { id: 'build', label: 'Build LLM Input', icon: '2' },
-                { id: 'generate', label: 'Generate Docs', icon: '3' }
-              ].map(step => (
-                <div key={step.id} className="step-card">
-                  <div className="text-xs text-warm-gray font-mono mb-1">STEP {step.icon}</div>
-                  <div className="text-sm font-semibold mb-3 text-near-black">{step.label}</div>
-                  <button
-                    disabled={loadingStep || (step.id === 'build' && !states.fetch) || (step.id === 'generate' && !states.build)}
-                    onClick={
-                      step.id === 'fetch' ? fetchRepo :
-                      step.id === 'build' ? buildInput : generateDocs
-                    }
-                    className="btn w-full py-2 btn-dark rounded-lg text-sm font-medium disabled:opacity-40 disabled:cursor-not-allowed text-cream">
-                    {loadingStep === step.id ? 'Working...' : step.label}
-                  </button>
+            {/* Nature Selection */}
+            <div className="nature-panel">
+              <div className="nature-panel-header">
+                <div className="nature-panel-icon">🧬</div>
+                <div>
+                  <div className="nature-panel-title">Project Nature</div>
+                  <div className="nature-panel-subtitle">Select your project type</div>
                 </div>
-              ))}
+                {states.nature && (
+                  <span className="nature-status-badge nature-status-done">✓ Configured</span>
+                )}
+                {!states.nature && fetchedFiles && (
+                  <span className="nature-status-badge nature-status-pending">Needs confirmation</span>
+                )}
+              </div>
+
+              {!fetchedFiles && !states.nature && (
+                <div className="nature-panel-body nature-panel-idle">
+                  Fetch a repository, then select a project type below
+                </div>
+              )}
+
+              {fetchedFiles && !states.nature && (
+                <div className="nature-panel-body">
+                  <div className="nature-card-grid">
+                    {NATURE_OPTIONS.map(opt => {
+                      const selected = projectNature === opt.value
+                      return (
+                        <button
+                          key={opt.value}
+                          onClick={() => setProjectNature(opt.value)}
+                          className={`nature-card ${selected ? 'nature-card-selected' : ''}`}
+                        >
+                          <span className="nature-card-icon">{opt.icon}</span>
+                          <span className="nature-card-label">{opt.label}</span>
+                          <span className="nature-card-desc">{opt.desc}</span>
+                          <span className={`nature-card-radio ${selected ? 'radio-selected' : ''}`} />
+                        </button>
+                      )
+                    })}
+                  </div>
+                  <div className="nature-confirm-row">
+                    <span className="text-xs text-warm-gray font-mono">{projectNature}</span>
+                    <button
+                      onClick={() => setStates(s => ({ ...s, nature: true }))}
+                      className="nature-confirm-btn">
+                      Confirm
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {states.nature && (
+                <div className="nature-panel-body">
+                  <div className="nature-detected-row">
+                    <div className="nature-badge-group">
+                      <span className="nature-badge nature-badge-done">✓ {projectNature}</span>
+                    </div>
+                  </div>
+                </div>
+              )}
             </div>
 
-            {/* Status */}
-            {loadingStep && (
-              <div className="flex items-center gap-2 text-xs font-mono text-warm-gray mb-4">
-                <span className="animate-pulse w-1.5 h-1.5 bg-orange rounded-full" />
-                <span className="animate-pulse w-1.5 h-1.5 bg-orange rounded-full animation-delay-200" />
-                <span className="animate-pulse w-1.5 h-1.5 bg-orange rounded-full animation-delay-400" />
-                <span>Working...</span>
-              </div>
-            )}
+            {/* Progress Bar */}
+            <div className="progress-track">
+              {STEPS.map(step => {
+                const state = getStepState(step.id)
+                return <div key={step.id} className={`progress-step progress-${state}`} />
+              })}
+            </div>
+
+            {/* Steps */}
+            <div className="grid grid-cols-3 gap-3 mb-6">
+              {STEPS.map(step => {
+                const state = getStepState(step.id)
+                return (
+                  <div key={step.id} className={`step-card step-${state}`}>
+                    <div className="step-header">
+                      <span className={`step-indicator`}>
+                        {state === 'done' ? '✓' : step.emoji}
+                      </span>
+                      <div className="step-info">
+                        <div className="step-label">{step.label}</div>
+                        <div className="step-desc">{step.desc}</div>
+                      </div>
+                    </div>
+                    <button
+                      disabled={state === 'pending' || state === 'done' || (loadingStep && loadingStep !== step.id)}
+                      onClick={
+                        step.id === 'fetch' ? fetchRepo :
+                        step.id === 'build' ? buildInput : generateDocs
+                      }
+                      className={`btn w-full py-2 rounded-lg text-sm font-medium transition-all duration-200 ${
+                        state === 'active'
+                          ? 'btn-active'
+                          : state === 'done'
+                            ? 'btn-done'
+                            : state === 'pending'
+                              ? 'btn-pending'
+                              : 'btn-dark'
+                      }`}>
+                      {state === 'active' ? 'Working' : state === 'done' ? 'Done' : step.label}
+                    </button>
+                  </div>
+                )
+              })}
+            </div>
             {error && (
               <div className="bg-orange-light border border-orange text-near-black text-sm px-4 py-3 rounded-lg mb-4 font-mono">
                 ⚠ {error}
@@ -522,6 +650,21 @@ function Pipeline() {
               )}
             </div>
 
+            {/* Output Toolbar */}
+            <div className="output-toolbar">
+              <button onClick={copyToClipboard} className="output-toolbar-btn">
+                {copyText === 'Copied!' ? '✓' : '📋'} {copyText}
+              </button>
+              <button onClick={downloadOutput} className="output-toolbar-btn">
+                ⬇ Download
+              </button>
+              {tab === 'raw' && (
+                <button onClick={() => setWordWrap(!wordWrap)} className="output-toolbar-btn">
+                  {wordWrap ? '⊟ Wrap: ON' : '⊞ Wrap: OFF'}
+                </button>
+              )}
+            </div>
+
             {tab === 'interactive' ? (
               <DocViewer
                 markdown={output}
@@ -529,7 +672,7 @@ function Pipeline() {
                 onClose={() => setTab('rendered')}
               />
             ) : tab === 'raw' ? (
-              <pre className="bg-off-white border border-sand text-near-black p-4 rounded-xl overflow-auto h-96 text-xs leading-relaxed font-mono">
+              <pre className={`bg-off-white border border-sand text-near-black p-4 rounded-xl overflow-auto h-96 text-xs leading-relaxed font-mono ${wordWrap ? 'whitespace-pre-wrap break-words' : ''}`}>
                 {output}
               </pre>
             ) : (
@@ -548,6 +691,11 @@ function Pipeline() {
               <span className="text-sand">→</span>
               <span className={stateClass('generate')}>● generate</span>
             </div>
+
+            {/* Audit Logs */}
+            {auditSummary && (
+              <AuditPanel auditSummary={auditSummary} />
+            )}
 
             {/* Publish to GitHub Pages */}
             {states.generate && (
@@ -687,7 +835,6 @@ function Footer() {
           </div>
         </div>
         <div className="footer-bottom">
-          <p>Built with React + Vite. Powered by Groq & multi-agent orchestration.</p>
         </div>
       </div>
     </footer>
