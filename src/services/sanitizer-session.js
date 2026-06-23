@@ -106,17 +106,6 @@ class SanitizerSession {
     return result;
   }
 
-  /**
-   * Backwards-compatible alias.
-   */
-  clean(text) {
-    return this.anonymize(text);
-  }
-
-  cleanFiles(files) {
-    return files.map(file => ({ ...file, content: this.anonymize(file.content) }));
-  }
-
   // ─── Audit (read-only — does NOT populate vault) ─────────────────────────────
 
   audit(text) {
@@ -134,38 +123,6 @@ class SanitizerSession {
     }
 
     return detected;
-  }
-
-  auditFiles(files) {
-    return files.map(file => ({
-      path:             file.path,
-      detectedPatterns: this.audit(file.content)
-    }));
-  }
-
-  // ─── Report ───────────────────────────────────────────────────────────────────
-
-  report(text, filePath = 'unknown') {
-    const piiTypes    = ['email', 'phone_us', 'phone_intl', 'ssn', 'credit_card', 'ip_address', 'iban'];
-    const secretTypes = ['api_key', 'jwt_token', 'aws_key', 'github_pat', 'password'];
-    const detected    = this.audit(text);
-    const highEntropy = this._detectHighEntropyStrings(text);
-
-    return {
-      filePath,
-      timestamp:        new Date().toISOString(),
-      hasSensitiveData: detected.length > 0 || highEntropy.length > 0,
-      summary: {
-        secrets:         detected.filter(d => secretTypes.includes(d)),
-        pii:             detected.filter(d => piiTypes.includes(d)),
-        highEntropyHits: highEntropy.length,
-      },
-      details: {
-        matchedPatterns:    detected,
-        highEntropyStrings: highEntropy,
-      },
-      anonymizedContent: this.anonymize(text),
-    };
   }
 
   // ─── Entropy detection ────────────────────────────────────────────────────────

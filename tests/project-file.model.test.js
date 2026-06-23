@@ -8,7 +8,6 @@ describe('ProjectFile', () => {
       expect(pf.content).toBe('console.log("hi")');
       expect(pf.extension).toBe('.js');
       expect(pf.size).toBe(20);
-      expect(pf.isSanitized).toBe(false);
       expect(pf.astTree).toBeNull();
     });
   });
@@ -22,16 +21,8 @@ describe('ProjectFile', () => {
         content: 'content',
         extension: '.js',
         size: 100,
-        isSanitized: false,
         astTree: null
       });
-    });
-
-    test('reflects sanitized state after sanitize call', () => {
-      const pf = new ProjectFile('src/app.js', 'secret=123', '.js', 12);
-      pf.Sanitize([]);
-      expect(pf.isSanitized).toBe(true);
-      expect(pf.toJSON().isSanitized).toBe(true);
     });
   });
 });

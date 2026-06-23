@@ -14,7 +14,6 @@
  *   4. session.destroy() → clear vault, free memory
  */
 
-const crypto = require('crypto');
 const SanitizerSession = require('./sanitizer-session');
 
 class SanitizerService {
@@ -28,7 +27,7 @@ class SanitizerService {
       { name: 'passwd',           regex: /passwd\s*[:=]\s*["'][^"']{4,}["']/gi },
       { name: 'github_pat',       regex: /ghp_[A-Za-z0-9]{20,}/g },
       { name: 'github_actions',   regex: /ghs_[A-Za-z0-9]{20,}/g },
-      { name: 'openai_key',       regex: /sk-[A-Za-z0-9]{20,}/g },
+      { name: 'openai_key',       regex: /sk-(?:proj-)?[A-Za-z0-9]{20,}/g },
       { name: 'slack_token',      regex: /xox[baprs]-[A-Za-z0-9\-]{10,}/g },
       { name: 'aws_key',          regex: /AKIA[A-Z0-9]{16}/g },
       { name: 'mailchimp_key',    regex: /[0-9a-f]{32}-us[0-9]+/g },
@@ -42,6 +41,7 @@ class SanitizerService {
       { name: 'ssh_private_key',  regex: /-----BEGIN OPENSSH PRIVATE KEY-----[\s\S]*?-----END OPENSSH PRIVATE KEY-----/g },
       { name: 'certificate',      regex: /-----BEGIN CERTIFICATE-----[\s\S]*?-----END CERTIFICATE-----/g },
       { name: 'dotenv_value',     regex: /^([A-Z][A-Z0-9_]{2,})\s*=\s*["']?([^\s"'\n]{8,})["']?$/gm },
+      { name: 'dotenv_secret',    regex: /^([A-Z][A-Z0-9_]{2,}(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|API_KEY))\s*=\s*["']?([^\s"'\n]{8,})["']?$/gm },
       // PII
       { name: 'email',            regex: /[a-zA-Z0-9._%+\-]+@[a-zA-Z0-9.\-]+\.[a-zA-Z]{2,}/g },
       { name: 'phone_us',         regex: /(\+1[\s\-.]?)?\(?\d{3}\)?[\s\-.]?\d{3}[\s\-.]?\d{4}/g },
@@ -66,6 +66,9 @@ class SanitizerService {
       { name: 'npm_token',        regex: /npm_[A-Za-z0-9]{36}/g },
       { name: 'cloudinary_url',   regex: /cloudinary:\/\/[0-9]+:[A-Za-z0-9_\-]+@[a-z0-9]+/g },
       { name: 'sendgrid_key',     regex: /SG\.[A-Za-z0-9\-_]{22}\.[A-Za-z0-9\-_]{43}/g },
+      { name: 'bearer_token',     regex: /Bearer\s+[A-Za-z0-9\-_.]{20,}/gi },
+      { name: 'api_key_header',   regex: /x-api-key["']?\s*[:=]\s*["']?[A-Za-z0-9\-_.]{16,}["']?/gi },
+      { name: 'authorization',    regex: /authorization["']?\s*[:=]\s*["']?[A-Za-z0-9\-_.]{20,}["']?/gi },
     ];
 
     this.customRules     = [];
@@ -81,12 +84,6 @@ class SanitizerService {
   createSession() {
     const rules = [...this.builtinPatterns, ...this._customPatterns];
     return new SanitizerSession(rules);
-  }
-
-  // ─── Shared getters (for User model, legacy code) ────────────────────────────
-
-  getAllPatterns() {
-    return [...this.builtinPatterns, ...this._customPatterns];
   }
 
   // ─── Custom rules API (singleton — shared across all sessions) ────────────────
@@ -123,25 +120,6 @@ class SanitizerService {
     }));
   }
 
-  // ─── Legacy helpers (backwards compatibility) ────────────────────────────────
-  // These create a temporary session, run the operation, and return results.
-  // New code should use createSession() directly.
-
-  resetVault() {
-    // No-op — vault is now per-session, not singleton.
-    // Kept for backwards compatibility so existing callers don't break.
-  }
-
-  get _vault() {
-    // Return an empty Map — singleton vault no longer exists.
-    // Kept for backwards compatibility (LLMInputBuilder reads _vault.size).
-    return new Map();
-  }
-
-  getVaultSnapshot() {
-    // Returns empty — use session.getVaultSnapshot() instead.
-    return {};
-  }
 }
 
 module.exports = new SanitizerService();

@@ -224,15 +224,15 @@ MIIEowIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy
     });
   });
 
-  describe('cleanFiles', () => {
-    test('anonymizes content in multiple files', () => {
-      const files = [
-        { path: 'src/config.js', content: 'const key = "AKIAIOSFODNN7EXAMPLE";' },
-        { path: 'src/db.js', content: 'const uri = "mongodb://user:pass@localhost/db";' }
-      ];
-      const result = session.cleanFiles(files);
-      expect(result[0].content).not.toContain('AKIAIOSFODNN7EXAMPLE');
-      expect(result[1].content).not.toContain('user:pass');
+  describe('anonymize on multiple patterns', () => {
+    test('redacts secrets of different types in a single string', () => {
+      const input = [
+        'aws: AKIAIOSFODNN7EXAMPLE',
+        'db: mongodb://user:pass@localhost/db'
+      ].join('\n');
+      const result = session.anonymize(input);
+      expect(result).not.toContain('AKIAIOSFODNN7EXAMPLE');
+      expect(result).not.toContain('user:pass');
     });
   });
 });

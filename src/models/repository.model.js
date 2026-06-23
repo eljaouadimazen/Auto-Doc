@@ -47,11 +47,9 @@ class Repository {
 
   static fromDTO(name, serializedFiles) {
     const repo = new Repository(`https://github.com/reconstruct/${name}`);
-    repo.#files = serializedFiles.map(f => {
-      const pf = new ProjectFile(f.path, f.content, f.extension, f.size);
-      if (f.isSanitized) pf.Sanitize([]);
-      return pf;
-    });
+    repo.#files = serializedFiles.map(f =>
+      new ProjectFile(f.path, f.content, f.extension, f.size)
+    );
     return repo;
   }
 
@@ -108,7 +106,7 @@ class Repository {
     } catch (err) { return null; }
   }
 
-  async GenerateDocumentation(mode, provider, apiKey = null) {
+  async GenerateDocumentation(mode, provider, apiKey = null, options = {}) {
     const rawFiles = this.#files.map(f => f.toJSON());
 
     // Create an isolated session for this request — no race conditions.
@@ -132,7 +130,7 @@ class Repository {
         const input = protocol.buildInput(
           `Generate Enforced Documentation for ${this.#name}`,
           { repository: this.#name, runId, apiKey: provider === 'ollama' ? null : apiKey, provider },
-          { files: sanitizedFiles, provider }
+          { files: sanitizedFiles, provider, ...options }
         );
 
         const output = await orchestrator.run(input);

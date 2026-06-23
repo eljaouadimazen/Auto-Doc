@@ -33,6 +33,7 @@ app.post('/fetch', rateLimiter.fetchLimit, (req, res) => generatorController.fet
 app.post('/build', rateLimiter.buildLimit, (req, res) => generatorController.buildInput(req, res));
 app.post('/generate-docs', rateLimiter.generateLimit, (req, res) => generatorController.generateDocs(req, res));
 app.post('/generate', rateLimiter.fetchLimit, (req, res) => generatorController.generate(req, res));
+app.post('/analyze-nature', rateLimiter.defaultLimit, (req, res) => generatorController.analyzeNature(req, res));
 app.get('/health', (req, res) => res.json({ status: 'ok', version: '1.0.0' }));
 
 // ── Key Validation ────────────────────────────────────────────────

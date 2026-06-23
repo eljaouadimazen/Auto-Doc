@@ -1,19 +1,7 @@
 jest.mock('../src/models/repository.model', () => {
-  const MockAuditLog = {
-    IncrementScanned: jest.fn(),
-    RecordEntry: jest.fn(),
-    GetSummary: jest.fn().mockReturnValue({ filesScanned: 2 }),
-  };
-
-  const mockFiles = [
-    { Sanitize: jest.fn().mockReturnValue([]) },
-    { Sanitize: jest.fn().mockReturnValue([{ type: 'secret', name: 'api_key' }]) },
-  ];
-
   const MockRepository = jest.fn().mockImplementation(() => ({
     FetchFiles: jest.fn().mockResolvedValue(),
-    files: mockFiles,
-    auditLog: MockAuditLog,
+    files: [],
     name: 'test-repo',
   }));
 
@@ -34,28 +22,6 @@ describe('User', () => {
       expect(user.apiKey).toBe('test-api-key');
     });
 
-    test('loads rules from sanitizer service', () => {
-      const user = new User('127.0.0.1', null);
-      expect(Array.isArray(user.rules)).toBe(true);
-      expect(user.rules.length).toBeGreaterThan(0);
-    });
-  });
-
-  describe('ManageRules', () => {
-    test('adds a new rule', () => {
-      const user = new User('127.0.0.1', 'key');
-      const result = user.ManageRules('add', { name: 'my_rule', pattern: 'secret', flags: 'gi' });
-      expect(result).toHaveProperty('id');
-      expect(result.name).toBe('my_rule');
-      expect(result.pattern).toBe('secret');
-    });
-
-    test('removes an existing rule', () => {
-      const user = new User('127.0.0.1', 'key');
-      const added = user.ManageRules('add', { name: 'temp', pattern: 'temp', flags: 'gi' });
-      const result = user.ManageRules('remove', { id: added.id });
-      expect(result).toBe(true);
-    });
   });
 
   describe('ViewAuditLogs', () => {
