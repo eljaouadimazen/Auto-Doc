@@ -5,8 +5,8 @@ const llmInputBuilder  = require('../services/llm-input-builder.service');
 const llmService       = require('../services/llm.service');
 const sanitizerService = require('../services/sanitizer.service');
 const sessionStore     = require('../services/sanitizer-session-store');
-const SanitizationRule = require('../models/sanitization-rule.model');
 const { sanitizeLog }  = require('../services/log-sanitizer');
+const auditStore       = require('../services/audit-store.service');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -61,6 +61,10 @@ class GeneratorController {
       const safeFiles   = repository.files.map(f => f.toJSON());
       const rawMarkdown = filesToMarkdown(safeFiles);
 
+      const auditSummary = repository.auditLog.GetSummary();
+      const fetchSessionId = `fetch_${repository.name}_${Date.now()}`;
+      auditStore.store(fetchSessionId, auditSummary);
+
       res.json({
         step:         'fetch',
         files:        safeFiles,
@@ -68,7 +72,8 @@ class GeneratorController {
         repoName:     repository.name,
         size:         rawMarkdown.length,
         preview:      rawMarkdown.substring(0, 1000),
-        auditSummary: repository.auditLog.GetSummary()
+        auditSummary,
+        auditSessionId: fetchSessionId
       });
     } catch (err) {
       console.error('[fetchRepo]', sanitizeLog(err.message));
@@ -92,6 +97,9 @@ class GeneratorController {
       const result = await llmInputBuilder.build(context, { useAST, provider, session });
 
       const sessionId = sessionStore.create(session);
+      if (result.audit) {
+        auditStore.store(sessionId, result.audit);
+      }
 
       res.json({
         step:         'build',
@@ -125,7 +133,12 @@ class GeneratorController {
         }
 
         const repository = Repository.fromDTO(repoName, files);
-        const docs       = await repository.GenerateDocumentation(mode, provider, apiKey);
+        const docs       = await repository.GenerateDocumentation(mode, provider, apiKey, {
+          projectNature:     req.body.projectNature,
+          logicSignals:      req.body.logicSignals,
+          hasExecutableCode: req.body.hasExecutableCode,
+          techStack:         req.body.techStack
+        });
 
         return res.json({
           step:          'generate',
@@ -255,6 +268,43 @@ class GeneratorController {
     }
   }
 
+  // --- ANALYZE PROJECT NATURE ---
+  async analyzeNature(req, res) {
+    try {
+      const { files, repoName } = req.body;
+      if (!files || !Array.isArray(files)) {
+        return res.status(400).json({ error: 'Files array required' });
+      }
+
+      const RepoAnalyzerAgent = require('../agents/repo-analyzer.agent');
+      const protocol = require('../agents/protocol');
+
+      const analyzer = new RepoAnalyzerAgent();
+      const input = protocol.buildInput(
+        'Analyze project nature',
+        { repository: repoName || 'unknown' },
+        {
+          repository: repoName || 'unknown',
+          files: files.map(f => ({
+            path: f.path,
+            snippet: (f.content || '').slice(0, 300),
+            size: f.size || (f.content || '').length
+          }))
+        }
+      );
+
+      const output = await analyzer.run(input);
+      if (output.status === 'failed') {
+        return res.status(500).json({ error: output.error });
+      }
+
+      res.json(output.result);
+    } catch (err) {
+      console.error('[analyzeNature]', sanitizeLog(err.message));
+      res.status(500).json({ error: err.message });
+    }
+  }
+
   // --- KEY VALIDATION ---
   async validateKey(req, res) {
   try {
@@ -282,35 +332,30 @@ class GeneratorController {
 
   // --- AUDIT LOGS ---
   getAuditLogs(req, res) {
-    res.json({
-      logs: [],
-      auditSummary: {
-        filesScanned:  0,
-        filesAffected: 0,
-        totalRedacted: 0,
-        findings:      [],
-        message:       'Audit logs are per-session — read from the fetch or build response.'
-      }
-    });
+    const sessionId = req.query.sessionId;
+    if (sessionId) {
+      const audit = auditStore.getBySessionId(sessionId);
+      return res.json({ log: audit, found: !!audit });
+    }
+    res.json({ logs: auditStore.getAll() });
   }
 
   // --- RULES MANAGEMENT ---
   listRules(req, res) {
-    const user = getUserContext(req);
+    const builtins = sanitizerService.builtinPatterns.map((p, idx) => ({
+      id:      `builtin_${idx}`,
+      name:    p.name,
+      pattern: p.regex.source,
+      flags:   p.regex.flags
+    }));
     res.json({
-      rules: user.rules.map(r => ({
-        id:      r.id,
-        name:    r.name,
-        pattern: r.pattern,
-        flags:   r.flags
-      }))
+      rules: [...builtins, ...sanitizerService.listCustomRules()]
     });
   }
 
   addRule(req, res) {
     try {
-      const user = getUserContext(req);
-      const rule = user.ManageRules('add', req.body);
+      const rule = sanitizerService.addCustomRule(req.body.name, req.body.pattern, req.body.flags);
       res.status(201).json({ message: 'Rule added', rule });
     } catch (err) {
       res.status(400).json({ error: err.message });
@@ -319,8 +364,7 @@ class GeneratorController {
 
   removeRule(req, res) {
     try {
-      const user = getUserContext(req);
-      user.ManageRules('remove', { id: req.params.id });
+      sanitizerService.removeCustomRule(req.params.id);
       res.json({ message: 'Rule removed' });
     } catch (err) {
       res.status(404).json({ error: err.message });
@@ -330,13 +374,14 @@ class GeneratorController {
   testRule(req, res) {
     try {
       const { pattern, flags = 'gi', sample } = req.body;
-      const rule  = new SanitizationRule('test', 'test', pattern, flags);
-      const count = (sample.match(new RegExp(pattern, flags)) || []).length;
+      const regex = new RegExp(pattern, flags);
+      const count = (sample.match(regex) || []).length;
+      const matched = regex.test(sample);
 
       res.json({
-        matched: rule.TestMatch(sample),
+        matched,
         count,
-        preview: rule.Apply(sample)
+        preview: sample.replace(regex, '[REDACTED_SECRET]')
       });
     } catch (err) {
       res.status(400).json({ error: err.message });

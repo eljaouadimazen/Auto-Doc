@@ -1,5 +1,5 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
 <head>
   <meta charset="UTF-8" />
   <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
@@ -14,17 +14,11 @@
   </script>
 
   <style>
-    .btn { transition: all 0.15s ease; }
-    .btn:disabled { opacity: 0.45; cursor: not-allowed; transform: none !important; }
-    .btn:not(:disabled):active { transform: scale(0.96); }
-    .animation-delay-200 { animation-delay: 0.2s; }
-    .animation-delay-400 { animation-delay: 0.4s; }
     #root { min-height: 100svh; }
 
-    /* Mermaid diagram styling inside rendered output */
     .rendered-output .mermaid {
       background: #1e293b;
-      border: 1px solid var(--sand);
+      border: 1px solid var(--border, hsl(217.2 32.6% 17.5%));
       border-radius: 0.75rem;
       padding: 1.5rem;
       margin: 1rem 0;
@@ -36,8 +30,8 @@
       height: auto;
     }
   </style>
-  <script type="module" crossorigin src="/assets/index-DcbM5kVZ.js"></script>
-  <link rel="stylesheet" crossorigin href="/assets/index-BVW84vtf.css">
+  <script type="module" crossorigin src="/assets/index-MS3OrncR.js"></script>
+  <link rel="stylesheet" crossorigin href="/assets/index-BZUD_Ekn.css">
 </head>
 <body>
   <div id="root"></div>

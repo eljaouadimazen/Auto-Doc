@@ -9,25 +9,8 @@
  *   console.error(sanitizeLog(err.stack));
  */
 
-const SECRET_PATTERNS = [
-  { name: 'groq_key',      regex: /gsk_[A-Za-z0-9]{20,}/g },
-  { name: 'openai_key',    regex: /sk-(?:proj-)?[A-Za-z0-9]{20,}/g },
-  { name: 'github_pat',    regex: /ghp_[A-Za-z0-9]{20,}/g },
-  { name: 'github_actions',regex: /ghs_[A-Za-z0-9]{20,}/g },
-  { name: 'aws_key',       regex: /AKIA[A-Z0-9]{16}/g },
-  { name: 'gemini_key',    regex: /AIza[0-9A-Za-z\-_]{35}/g },
-  { name: 'stripe_key',    regex: /(?:sk|pk|rk)_(?:live|test)_[A-Za-z0-9]{24,}/g },
-  { name: 'bearer_token',  regex: /Bearer\s+[A-Za-z0-9\-_.]{20,}/gi },
-  { name: 'api_key_header',regex: /x-api-key["']?\s*[:=]\s*["']?[A-Za-z0-9\-_.]{16,}["']?/gi },
-  { name: 'authorization', regex: /authorization["']?\s*[:=]\s*["']?[A-Za-z0-9\-_.]{20,}["']?/gi },
-  { name: 'dotenv_secret', regex: /^([A-Z][A-Z0-9_]{2,}(?:KEY|SECRET|TOKEN|PASSWORD|PASSWD|API_KEY))\s*=\s*["']?([^\s"'\n]{8,})["']?$/gm },
-  { name: 'mongodb_uri',   regex: /mongodb(?:\+srv)?:\/\/[^\s"')]+/gi },
-  { name: 'postgres_uri',  regex: /postgres(?:ql)?:\/\/[^\s"')]+/gi },
-  { name: 'redis_uri',     regex: /redis:\/\/[^\s"')]+/gi },
-  { name: 'private_key',   regex: /-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |OPENSSH )?PRIVATE KEY-----/g },
-  { name: 'slack_token',   regex: /xox[baprs]-[A-Za-z0-9\-]{10,}/g },
-  { name: 'sendgrid_key',  regex: /SG\.[A-Za-z0-9\-_]{22}\.[A-Za-z0-9\-_]{43}/g },
-];
+const sanitizerService = require('./sanitizer.service');
+const SECRET_PATTERNS = sanitizerService.builtinPatterns;
 
 /**
  * Sanitize a string by replacing known secret patterns with [REDACTED].

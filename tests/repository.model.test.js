@@ -133,8 +133,8 @@ describe('Repository', () => {
   describe('fromDTO', () => {
     test('reconstructs Repository from serialized data', () => {
       const serialized = [
-        { path: 'src/app.js', content: 'console.log(1)', extension: '.js', size: 13, isSanitized: false },
-        { path: 'src/utils.js', content: 'const x = 1', extension: '.js', size: 11, isSanitized: false },
+        { path: 'src/app.js', content: 'console.log(1)', extension: '.js', size: 13 },
+        { path: 'src/utils.js', content: 'const x = 1', extension: '.js', size: 11 },
       ];
 
       const repo = Repository.fromDTO('test-repo', serialized);

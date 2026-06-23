@@ -41,23 +41,42 @@ class EnforcedOrchestrator extends BaseAgent {
     this.onProgress({ stage: 2, message: `${safeFiles.length} files cleared security gate` });
 
     // ── Stage 3: Repo Analyzer ─────────────────────────────────────────
-    const analyzerInput = protocol.buildInput(
-      'Analyze codebase logic and nature',
-      { ...agentInput.context, apiKey },
-      {
-        repository,
-        files: safeFiles.map(f => ({
-          path:    f.path,
-          snippet: (f.content || '').slice(0, 300),
-          size:    (f.content || '').length
-        }))
-      }
-    );
-    const analysis = await this.analyzer.run(analyzerInput);
-    if (analysis.status === 'failed') throw new Error(`RepoAnalyzer failed: ${analysis.error}`);
-    
-    const { projectNature, logicSignals, hasExecutableCode } = analysis.result;
-    this.onProgress({ stage: 3, message: `Project classified as ${projectNature}` });
+    const userNature = agentInput.input.projectNature;
+    let projectNature, logicSignals, hasExecutableCode;
+
+    if (userNature) {
+      // User provided nature via /analyze-nature — skip LLM call
+      projectNature     = userNature;
+      logicSignals      = agentInput.input.logicSignals || [];
+      hasExecutableCode = agentInput.input.hasExecutableCode !== undefined
+        ? agentInput.input.hasExecutableCode
+        : safeFiles.some(f =>
+            ['.js', '.ts', '.py', '.java', '.go', '.rb', '.php', '.cpp'].some(ext =>
+              f.path.endsWith(ext)
+            )
+          );
+      this.onProgress({ stage: 3, message: `Project nature set by user: ${projectNature}` });
+    } else {
+      const analyzerInput = protocol.buildInput(
+        'Analyze codebase logic and nature',
+        { ...agentInput.context, apiKey },
+        {
+          repository,
+          files: safeFiles.map(f => ({
+            path:    f.path,
+            snippet: (f.content || '').slice(0, 300),
+            size:    (f.content || '').length
+          }))
+        }
+      );
+      const analysis = await this.analyzer.run(analyzerInput);
+      if (analysis.status === 'failed') throw new Error(`RepoAnalyzer failed: ${analysis.error}`);
+
+      projectNature     = analysis.result.projectNature;
+      logicSignals      = analysis.result.logicSignals;
+      hasExecutableCode = analysis.result.hasExecutableCode;
+      this.onProgress({ stage: 3, message: `Project classified as ${projectNature}` });
+    }
 
     // ── Stage 4: Template Selector ──────────────────────────────────────
     const templateInput = protocol.buildInput(
