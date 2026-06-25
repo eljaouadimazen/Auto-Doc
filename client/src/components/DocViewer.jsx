@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
+import DOMPurify from 'dompurify'
 
 const THEME_KEY = 'ghp-docs-theme'
 
@@ -223,9 +224,9 @@ export default function DocViewer({ markdown, repoName, onClose }) {
               color: isDark ? '#e2e8f0' : '#1e293b'
             }}
             dangerouslySetInnerHTML={{
-              __html: highlightHtml
+              __html: DOMPurify.sanitize(highlightHtml
                 .replace(/<pre><code class="language-mermaid">/g, '<div class="mermaid-container"><div class="mermaid">')
-                .replace(/<\/code><\/pre>/g, '</div></div>')
+                .replace(/<\/code><\/pre>/g, '</div></div>'))
             }}
           />
           <div style={{
