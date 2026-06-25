@@ -79,7 +79,7 @@ function Pipeline() {
     } else if (apiKey.trim()) {
       validateKey(apiKey.trim())
     }
-  }, [provider])
+  }, [provider]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Run Mermaid whenever rendered tab is active or output changes
   useEffect(() => {
