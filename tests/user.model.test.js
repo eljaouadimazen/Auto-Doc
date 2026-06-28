@@ -1,9 +1,20 @@
 jest.mock('../src/models/repository.model', () => {
-  const MockRepository = jest.fn().mockImplementation(() => ({
-    FetchFiles: jest.fn().mockResolvedValue(),
-    files: [],
-    name: 'test-repo',
-  }));
+const MockRepository = jest.fn().mockImplementation(() => {
+    const auditLog = {
+        IncrementScanned: jest.fn(),
+        RecordEntry: jest.fn(),
+    };
+    return {
+        FetchFiles: jest.fn().mockImplementation(async () => {
+            auditLog.IncrementScanned();
+            auditLog.IncrementScanned();
+            auditLog.RecordEntry();
+        }),
+        files: [],
+        name: 'test-repo',
+        auditLog,
+    };
+});
 
   return MockRepository;
 });

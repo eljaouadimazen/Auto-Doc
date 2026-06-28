@@ -87,8 +87,8 @@ class SanitizerSession {
     this._rules.forEach(({ name, regex }) => {
       regex.lastIndex = 0;
       result = result.replace(regex, (match, p1, p2) => {
-        if (name === 'dotenv_value' && p1) {
-          const token = this._storeInVault('dotenv_value', p2 ?? match);
+        if ((name === 'dotenv_value' || name === 'dotenv_secret') && p1) {
+          const token = this._storeInVault(name, p2 ?? match);
           return `${p1}=${token}`;
         }
         const token = this._storeInVault(name, match);

@@ -103,7 +103,7 @@ MIIEowIBAAKCAQEA0Z3VS5JJcds3xfn/ygWyF8PbnGy
       const anon = session.anonymize(text);
       expect(anon).toContain('DB_PASSWORD=');
       expect(anon).not.toContain('supersecretvalue123');
-      expect(anon).toContain('[TOKEN_DOTENV_VALUE_');
+      expect(anon).toContain('[TOKEN_DOTENV_');
     });
   });
 

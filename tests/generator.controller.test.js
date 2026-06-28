@@ -397,8 +397,14 @@ describe('GeneratorController', () => {
 
   describe('DELETE /rules/:id', () => {
     test('removes a rule', async () => {
+      const addRes = await request(app)
+        .post('/rules')
+        .send({ name: 'delete_test', pattern: 'test', flags: 'gi' });
+
+      const ruleId = addRes.body.rule.id;
+
       const res = await request(app)
-        .delete('/rules/some-rule-id');
+        .delete(`/rules/${ruleId}`);
 
       expect(res.status).toBe(200);
       expect(res.body.message).toBe('Rule removed');
