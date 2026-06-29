@@ -109,7 +109,6 @@ class Repository {
   async GenerateDocumentation(mode, provider, apiKey = null, options = {}) {
     const rawFiles = this.#files.map(f => f.toJSON());
 
-    // Create an isolated session for this request — no race conditions.
     const session = sanitizerService.createSession();
 
     const sanitizedFiles = rawFiles.map(f => ({
@@ -119,6 +118,8 @@ class Repository {
 
     let docContent;
     let stats;
+    let docType = options.docType || 'README';
+    let targetAudience = options.targetAudience || 'DEVELOPER';
 
     try {
       if (mode === 'agentic') {
@@ -130,7 +131,7 @@ class Repository {
         const input = protocol.buildInput(
           `Generate Enforced Documentation for ${this.#name}`,
           { repository: this.#name, runId, apiKey: provider === 'ollama' ? null : apiKey, provider },
-          { files: sanitizedFiles, provider, ...options }
+          { files: sanitizedFiles, provider, docType, targetAudience, ...options }
         );
 
         const output = await orchestrator.run(input);

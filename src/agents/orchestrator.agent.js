@@ -4,7 +4,6 @@
 
 const BaseAgent               = require('./base.agent');
 const RepoAnalyzerAgent       = require('./repo-analyzer.agent');
-const TemplateSelectorAgent   = require('./template-selector.agent');
 const CodeIntelligenceAgent   = require('./code-intelligence.agent');
 const SecurityAgent           = require('./security.agent');
 const WriterAgent             = require('./writer.agent');
@@ -14,11 +13,23 @@ const protocol                = require('./protocol');
 
 const CODE_INTEL_LIMIT = 10;
 
+function selectTemplate(projectNature) {
+  const mapping = {
+    BACKEND:       { templateId: 'FULL_SOFTWARE', diagramType: 'CLASS' },
+    FRONTEND:      { templateId: 'FULL_SOFTWARE', diagramType: 'COMPONENT' },
+    FULLSTACK:     { templateId: 'FULL_SOFTWARE', diagramType: 'COMPONENT' },
+    MOBILE:        { templateId: 'FULL_SOFTWARE', diagramType: 'COMPONENT' },
+    DEVOPS:        { templateId: 'FULL_SOFTWARE', diagramType: 'PIPELINE' },
+    LIBRARY:       { templateId: 'LIBRARY',       diagramType: 'NONE' },
+    RESOURCE_LIST: { templateId: 'RESOURCE_LIST',  diagramType: 'NONE' },
+  };
+  return mapping[projectNature] || { templateId: 'FULL_SOFTWARE', diagramType: 'NONE' };
+}
+
 class EnforcedOrchestrator extends BaseAgent {
   constructor(options = {}) {
     super('Orchestrator', 'Coordinateur du pipeline de documentation certifié.');
     this.analyzer         = new RepoAnalyzerAgent();
-    this.templateSelector  = new TemplateSelectorAgent();
     this.codeAgent        = new CodeIntelligenceAgent();
     this.securityAgent    = new SecurityAgent();
     this.writer           = new WriterAgent();
@@ -28,7 +39,13 @@ class EnforcedOrchestrator extends BaseAgent {
   }
 
   async execute(agentInput) {
-    const { files, provider } = agentInput.input;
+    const {
+      files, provider,
+      targetAudience    = 'DEVELOPER',
+      docType           = 'README',
+      businessModel     = '',
+      projectProgress   = '',
+    } = agentInput.input;
     const repository = agentInput.context.repository;
     const apiKey = agentInput.context.apiKey || null;
 
@@ -45,7 +62,6 @@ class EnforcedOrchestrator extends BaseAgent {
     let projectNature, logicSignals, hasExecutableCode;
 
     if (userNature) {
-      // User provided nature via /analyze-nature — skip LLM call
       projectNature     = userNature;
       logicSignals      = agentInput.input.logicSignals || [];
       hasExecutableCode = agentInput.input.hasExecutableCode !== undefined
@@ -78,16 +94,8 @@ class EnforcedOrchestrator extends BaseAgent {
       this.onProgress({ stage: 3, message: `Project classified as ${projectNature}` });
     }
 
-    // ── Stage 4: Template Selector ──────────────────────────────────────
-    const templateInput = protocol.buildInput(
-      'Select best documentation template',
-      { ...agentInput.context, apiKey },
-      { projectNature, logicSignals, hasExecutableCode }
-    );
-    const templateSelection = await this.templateSelector.run(templateInput);
-    if (templateSelection.status === 'failed') throw new Error(`TemplateSelector failed: ${templateSelection.error}`);
-    
-    const { templateId, diagramType } = templateSelection.result; 
+    // ── Stage 4: Template Selector (deterministic, no LLM call) ────────
+    const { templateId, diagramType } = selectTemplate(projectNature);
     this.onProgress({ stage: 4, message: `Template: ${templateId}, Diagram Mode: ${diagramType || 'NONE'}` });
 
     // ── Stage 7: Diagram Generation ──────────────────────────────────────
@@ -130,7 +138,10 @@ class EnforcedOrchestrator extends BaseAgent {
         projectNature,
         docStrategy: templateId,
         logicSignals,
-        architectureDiagram, 
+        architectureDiagram,
+        targetAudience,
+        businessModel,
+        projectProgress,
         fileAnalyses: fileAnalyses.length > 0
           ? fileAnalyses
           : safeFiles.map(f => ({
