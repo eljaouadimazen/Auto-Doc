@@ -17,6 +17,7 @@ import {
   Settings, Key, Dna, Download, Hammer, FileText, BrainCircuit,
   Zap, Shield, ShieldCheck, ShieldAlert, Package, Rocket, Eye,
   Copy, CheckCircle2, ArrowRight, AlertCircle,
+  Users, Briefcase, Clock,
 } from 'lucide-react'
 import DocViewer from './components/DocViewer'
 import AuditPanel from './components/AuditPanel'
@@ -64,6 +65,11 @@ function Pipeline() {
   const [wordWrap, setWordWrap] = useState(false)
   const [copyText, setCopyText] = useState('Copy')
   const [auditSummary, setAuditSummary] = useState(null)
+  const [docType, setDocType] = useState('README')
+  const [targetAudience, setTargetAudience] = useState('DEVELOPER')
+  const [businessModel, setBusinessModel] = useState('')
+  const [projectProgress, setProjectProgress] = useState('')
+  const [pdfBase64, setPdfBase64] = useState(null)
   const keyTimer = useRef(null)
   const renderedRef = useRef(null)
 
@@ -156,6 +162,7 @@ function Pipeline() {
     setPublishStatus(null)
     setPublishUrl('')
     setPublishError('')
+    setPdfBase64(null)
     setStates({ fetch: false, build: false, nature: false, generate: false })
     setMessages(null)
     setSessionId(null)
@@ -252,7 +259,11 @@ function Pipeline() {
         body = {
           files: fetchedFiles,
           repoName,
-          projectNature
+          projectNature,
+          docType,
+          targetAudience,
+          businessModel: businessModel.trim() || undefined,
+          projectProgress: projectProgress.trim() || undefined
         }
       } else if (Array.isArray(messages)) {
         body = { chunks: messages, sessionId }
@@ -269,6 +280,7 @@ function Pipeline() {
       if (!res.ok) throw new Error(data.error || 'Generation failed')
 
       setOutput(data.documentation)
+      if (data.pdfBase64) setPdfBase64(data.pdfBase64)
       setStates(s => ({ ...s, generate: true }))
       setTab('rendered')
     } catch (err) {
@@ -320,6 +332,18 @@ function Pipeline() {
   }
 
   const downloadOutput = () => {
+    if (docType === 'PDF' && pdfBase64) {
+      const byteChars = atob(pdfBase64)
+      const byteNums = new Array(byteChars.length)
+      for (let i = 0; i < byteChars.length; i++) byteNums[i] = byteChars.charCodeAt(i)
+      const byteArray = new Uint8Array(byteNums)
+      const blob = new Blob([byteArray], { type: 'application/pdf' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url; a.download = `${repoName || 'docs'}.pdf`
+      a.click(); URL.revokeObjectURL(url)
+      return
+    }
     const blob = new Blob([output], { type: 'text/markdown' })
     const url = URL.createObjectURL(blob)
     const a = document.createElement('a')
@@ -514,6 +538,158 @@ function Pipeline() {
               </div>
             </CardContent>
 
+            {/* Project Nature — upfront, before pipeline starts */}
+            <CardContent className="p-0 mb-4">
+              <div className="bg-muted/20 rounded-xl p-4 sm:p-5 border border-border/50">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-9 h-9 flex items-center justify-center bg-muted/50 border border-border/50 rounded-lg shrink-0">
+                    <Dna className="w-4 h-4 text-cyan-accent" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">Project Nature</div>
+                    <div className="text-xs text-muted-foreground font-mono">Tell us what you're building</div>
+                  </div>
+                  {projectNature && (
+                    <Badge variant="success" className="ml-auto">✓ {projectNature}</Badge>
+                  )}
+                </div>
+                <div className="bg-background/20 rounded-lg p-3">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                    {NATURE_OPTIONS.map(opt => {
+                      const selected = projectNature === opt.value
+                      const Icon = opt.icon
+                      return (
+                        <button
+                          key={opt.value}
+                          onClick={() => {
+                            setProjectNature(opt.value)
+                            setStates(s => ({ ...s, nature: true }))
+                          }}
+                          className={`flex flex-col items-start gap-1 p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
+                            selected
+                              ? 'bg-accent/10 border-accent shadow-[0_0_0_1px_hsl(24.9_100%_50%)]'
+                              : 'bg-muted/30 border-border/50 hover:bg-muted/50 hover:border-strong'
+                          }`}>
+                          <Icon className={`w-4 h-4 ${selected ? 'text-accent' : 'text-muted-foreground'}`} />
+                          <span className="text-sm font-semibold text-foreground">{opt.label}</span>
+                          <span className="text-[11px] text-muted-foreground font-mono leading-tight">{opt.desc}</span>
+                        </button>
+                      )
+                    })}
+                  </div>
+                </div>
+              </div>
+            </CardContent>
+
+            {/* Documentation Type */}
+            <CardContent className="p-0 mb-4">
+              <div className="bg-muted/20 rounded-xl p-4 border border-border/50">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-9 h-9 flex items-center justify-center bg-muted/50 border border-border/50 rounded-lg shrink-0">
+                    <FileText className="w-4 h-4 text-cyan-accent" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">Documentation Type</div>
+                    <div className="text-xs text-muted-foreground font-mono">Choose output format</div>
+                  </div>
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    variant={docType === 'README' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setDocType('README')}
+                    className="flex-1 gap-1.5"
+                  >
+                    <FileText className="w-3.5 h-3.5" /> README (.md)
+                  </Button>
+                  <Button
+                    variant={docType === 'PDF' ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setDocType('PDF')}
+                    className="flex-1 gap-1.5"
+                  >
+                    <Download className="w-3.5 h-3.5" /> PDF + Diagrams
+                  </Button>
+                </div>
+              </div>
+            </CardContent>
+
+            {/* Target Audience */}
+            <CardContent className="p-0 mb-4">
+              <div className="bg-muted/20 rounded-xl p-4 border border-border/50">
+                <div className="flex items-center gap-3 mb-3">
+                  <div className="w-9 h-9 flex items-center justify-center bg-muted/50 border border-border/50 rounded-lg shrink-0">
+                    <Users className="w-4 h-4 text-cyan-accent" />
+                  </div>
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">Target Audience</div>
+                    <div className="text-xs text-muted-foreground font-mono">Tailor content depth and focus</div>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                  {[
+                    { value: 'USER', label: 'User', desc: 'Walkthrough, no technical details' },
+                    { value: 'DEVELOPER', label: 'Developer', desc: 'Full technical + business context' },
+                    { value: 'PROJECT_MANAGER', label: 'Project Manager', desc: 'High-level + progress' },
+                    { value: 'PRODUCT_OWNER', label: 'Product Owner', desc: 'Business value + progress' },
+                  ].map(opt => (
+                    <button
+                      key={opt.value}
+                      onClick={() => setTargetAudience(opt.value)}
+                      className={`flex flex-col items-start gap-1 p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
+                        targetAudience === opt.value
+                          ? 'bg-accent/10 border-accent shadow-[0_0_0_1px_hsl(24.9_100%_50%)]'
+                          : 'bg-muted/30 border-border/50 hover:bg-muted/50 hover:border-strong'
+                      }`}
+                    >
+                      <span className="text-sm font-semibold text-foreground">{opt.label}</span>
+                      <span className="text-[11px] text-muted-foreground font-mono leading-tight">{opt.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            </CardContent>
+
+            {/* Business Model — shown for DEV / PM / PO */}
+            {targetAudience !== 'USER' && (
+              <CardContent className="p-0 mb-4">
+                <div className="bg-muted/20 rounded-xl p-4 border border-border/50">
+                  <div className="flex items-center gap-3 mb-2">
+                    <Briefcase className="w-4 h-4 text-cyan-accent" />
+                    <span className="text-sm font-semibold text-foreground">Business Model</span>
+                    <span className="text-[10px] text-muted-foreground font-mono">(optional)</span>
+                  </div>
+                  <textarea
+                    value={businessModel}
+                    onChange={e => setBusinessModel(e.target.value)}
+                    placeholder="Describe the business context: problem statement, target users, value proposition, revenue model, key differentiators..."
+                    rows={3}
+                    className="w-full bg-background/40 border border-border/50 rounded-lg p-3 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 resize-none focus:outline-none focus:border-accent/50 transition-colors"
+                  />
+                </div>
+              </CardContent>
+            )}
+
+            {/* Project Progress — shown for PM / PO */}
+            {(targetAudience === 'PROJECT_MANAGER' || targetAudience === 'PRODUCT_OWNER') && (
+              <CardContent className="p-0 mb-4">
+                <div className="bg-muted/20 rounded-xl p-4 border border-border/50">
+                  <div className="flex items-center gap-3 mb-2">
+                    <Clock className="w-4 h-4 text-cyan-accent" />
+                    <span className="text-sm font-semibold text-foreground">Project Progress</span>
+                    <span className="text-[10px] text-muted-foreground font-mono">(optional)</span>
+                  </div>
+                  <textarea
+                    value={projectProgress}
+                    onChange={e => setProjectProgress(e.target.value)}
+                    placeholder="Describe current status: current phase, completed milestones, next steps, timeline, blockers..."
+                    rows={3}
+                    className="w-full bg-background/40 border border-border/50 rounded-lg p-3 text-sm font-mono text-foreground placeholder:text-muted-foreground/50 resize-none focus:outline-none focus:border-accent/50 transition-colors"
+                  />
+                </div>
+              </CardContent>
+            )}
+
             {/* URL Input */}
             <CardContent className="p-0 mb-4">
               <label className="block text-xs text-muted-foreground font-mono mb-1.5 uppercase tracking-widest">
@@ -546,70 +722,6 @@ function Pipeline() {
                     {useAST ? 'Extracts code structure — fewer tokens, smarter docs' : 'Raw truncation mode'}
                   </div>
                 </div>
-              </div>
-            </CardContent>
-
-            {/* Nature Panel */}
-            <CardContent className="p-0 mb-6">
-              <div className="bg-muted/20 rounded-xl p-4 sm:p-5 border border-border/50">
-                <div className="flex items-center gap-3 mb-3">
-                  <div className="w-9 h-9 flex items-center justify-center bg-muted/50 border border-border/50 rounded-lg shrink-0">
-                    <Dna className="w-4 h-4 text-cyan-accent" />
-                  </div>
-                  <div>
-                    <div className="text-sm font-semibold text-foreground">Project Nature</div>
-                    <div className="text-xs text-muted-foreground font-mono">Select your project type</div>
-                  </div>
-                  {states.nature && (
-                    <Badge variant="success" className="ml-auto">✓ Configured</Badge>
-                  )}
-                  {!states.nature && fetchedFiles && (
-                    <Badge variant="secondary" className="ml-auto">Needs confirmation</Badge>
-                  )}
-                </div>
-
-                {!fetchedFiles && !states.nature && (
-                  <div className="text-center py-4 text-xs text-muted-foreground font-mono bg-background/20 rounded-lg">
-                    Fetch a repository, then select a project type below
-                  </div>
-                )}
-
-                {fetchedFiles && !states.nature && (
-                  <div className="bg-background/20 rounded-lg p-3">
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mb-3">
-                      {NATURE_OPTIONS.map(opt => {
-                        const selected = projectNature === opt.value
-                        const Icon = opt.icon
-                        return (
-                          <button
-                            key={opt.value}
-                            onClick={() => setProjectNature(opt.value)}
-                            className={`flex flex-col items-start gap-1 p-2.5 rounded-lg border text-left cursor-pointer transition-all ${
-                              selected
-                                ? 'bg-accent/10 border-accent shadow-[0_0_0_1px_hsl(24.9_100%_50%)]'
-                                : 'bg-muted/30 border-border/50 hover:bg-muted/50 hover:border-strong'
-                            }`}>
-                            <Icon className={`w-4 h-4 ${selected ? 'text-accent' : 'text-muted-foreground'}`} />
-                            <span className="text-sm font-semibold text-foreground">{opt.label}</span>
-                            <span className="text-[11px] text-muted-foreground font-mono leading-tight">{opt.desc}</span>
-                          </button>
-                        )
-                      })}
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <span className="text-xs text-muted-foreground font-mono">{projectNature}</span>
-                      <Button size="sm" onClick={() => setStates(s => ({ ...s, nature: true }))}>
-                        Confirm
-                      </Button>
-                    </div>
-                  </div>
-                )}
-
-                {states.nature && (
-                  <div className="bg-background/20 rounded-lg p-3">
-                    <Badge variant="success">✓ {projectNature}</Badge>
-                  </div>
-                )}
               </div>
             </CardContent>
 

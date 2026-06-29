@@ -7,6 +7,7 @@ const sanitizerService = require('../services/sanitizer.service');
 const sessionStore     = require('../services/sanitizer-session-store');
 const { sanitizeLog }  = require('../services/log-sanitizer');
 const auditStore       = require('../services/audit-store.service');
+const PdfGeneratorService = require('../services/pdf-generator.service');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -124,6 +125,11 @@ class GeneratorController {
       const apiKey   = req.headers['x-api-key'] || null;
       const { chunks, messages, files, repoName } = req.body;
 
+      const docType         = req.body.docType         || 'README';
+      const targetAudience  = req.body.targetAudience  || 'DEVELOPER';
+      const businessModel   = req.body.businessModel   || '';
+      const projectProgress = req.body.projectProgress || '';
+
       // ── AGENTIC MODE ──────────────────────────────────────────────────
       if (mode === 'agentic') {
         if (!files || !Array.isArray(files)) {
@@ -137,15 +143,36 @@ class GeneratorController {
           projectNature:     req.body.projectNature,
           logicSignals:      req.body.logicSignals,
           hasExecutableCode: req.body.hasExecutableCode,
-          techStack:         req.body.techStack
+          techStack:         req.body.techStack,
+          docType,
+          targetAudience,
+          businessModel,
+          projectProgress
         });
 
-        return res.json({
+        const response = {
           step:          'generate',
           documentation: docs.content,
           mode:          'agentic',
-          stats:         docs.stats
-        });
+          stats:         docs.stats,
+          targetAudience
+        };
+
+        if (docType === 'PDF') {
+          try {
+            const pdfBuffer = await PdfGeneratorService.generatePdf(
+              docs.content,
+              repoName,
+              { ...docs.stats, generatedAt: docs.generatedAt }
+            );
+            response.pdfBase64 = pdfBuffer.toString('base64');
+          } catch (pdfErr) {
+            console.error('[generateDocs] PDF generation failed:', sanitizeLog(pdfErr.message));
+            response.pdfError = pdfErr.message;
+          }
+        }
+
+        return res.json(response);
       }
 
       // ── CLASSIC MODE — chunk iteration ────────────────────────────────

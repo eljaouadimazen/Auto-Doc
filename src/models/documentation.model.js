@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const ViewerGeneratorService = require('../services/viewer-generator.service');
 const PublisherService = require('../services/publisher.service');
+const PdfGeneratorService = require('../services/pdf-generator.service');
 
 class Documentation {
   #content;
@@ -32,6 +33,15 @@ class Documentation {
     );
     fs.writeFileSync(fullPath, html, 'utf8');
     return `/docs/${fileName}`;
+  }
+
+  async GeneratePdf(repoName) {
+    const pdfBuffer = await PdfGeneratorService.generatePdf(
+      this.#content,
+      repoName,
+      { ...this.#stats, generatedAt: this.#generatedAt.toISOString() }
+    );
+    return pdfBuffer;
   }
 
   async PublishToPages(targetRepo, githubToken, repoName) {

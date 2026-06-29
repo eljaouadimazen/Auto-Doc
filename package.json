@@ -32,6 +32,7 @@
     "langchain": "^1.2.37",
     "node-fetch": "^2.7.0",
     "openai": "^6.24.0",
+    "puppeteer": "^25.2.1",
     "simple-git": "^3.36.0",
     "undici": "^8.5.0"
   },
