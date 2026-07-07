@@ -72,22 +72,37 @@ src/
 ├── app.js                          ← Express server, routes, middleware
 ├── controllers/
 │   └── generator.controller.js     ← Pipeline orchestration, API key handling
-├── models/                         ← OOP Domain Models (business logic)
+├── models/                         ← OOP Domain Models (5 files)
 │   ├── user.model.js               ← User context + API key validation
 │   ├── repository.model.js         ← GitHub fetching + aggregate root
-│   ├── project-file.model.js       ← File entity with self-sanitization
+│   ├── project-file.model.js       ← File entity with AST extraction
 │   ├── audit-log.model.js          ← Per-repo in-memory audit trail
-│   ├── sanitization-rule.model.js  ← Regex rule value object
 │   └── documentation.model.js      ← Generated doc artifact
+├── agents/                         ← Multi-Agent System (9 files)
+│   ├── base.agent.js               ← Abstract base (LLM, retry, tracing)
+│   ├── protocol.js                 ← AgentInput/AgentOutput contract
+│   ├── orchestrator.agent.js       ← EnforcedOrchestrator pipeline
+│   ├── code-intelligence.agent.js  ← LLM-powered code understanding
+│   ├── security.agent.js           ← Semantic secret detection
+│   ├── writer.agent.js             ← Documentation generation
+│   ├── repo-analyzer.agent.js      ← Project classification
+│   ├── template-selector.agent.js  ← Template selection (unused in pipeline)
+│   └── diagram.agent.js            ← Mermaid diagram generation
 └── services/
-    ├── sanitizer.service.js        ← Regex pattern matching (34 built-in)
+    ├── sanitizer.service.js        ← Pattern registry + session factory (48 patterns)
     ├── sanitizer-session.js        ← Per-request vault for tokenization
     ├── sanitizer-session-store.js  ← Session persistence across HTTP requests
+    ├── audit-store.service.js      ← Audit log storage by session ID
     ├── log-sanitizer.js            ← Global console.error secret stripping
     ├── ast-parser.service.js       ← Regex-based JS/TS/Python parser
     ├── llm-input-builder.service.js ← Prompt builder (AST + raw modes, chunks)
     ├── llm.service.js              ← 4-provider LLM client
     ├── diagram.service.js          ← High-signal file selector for diagrams
+    ├── graph.service.js            ← Knowledge graph querying (graphify output)
+    ├── job-queue.service.js        ← Async job management with 1hr TTL
+    ├── pdf-generator.service.js    ← Puppeteer-based PDF generation
+    ├── publisher.service.js        ← GitHub Pages deployment via Octokit
+    ├── viewer-generator.service.js ← HTML doc viewer generator
     └── rate-limiter.middleware.js  ← Sliding window rate limiter
 ```
 
@@ -100,17 +115,30 @@ GitHub URL
     ↓
 Repository model          → Octokit fetch, base64 decode (NO github.service.js)
     ↓
-SanitizerSession          → Vault-based tokenization (regex + entropy)
+SanitizerSession          → anoynmize() vault-based tokenization (regex + entropy)
     ↓
-ast-parser.service.js     → Extract classes, functions, routes, imports, env vars
-    ↓
-llm-input-builder.service.js → Build structured prompt (AST or raw mode, chunks)
-    ↓
-llm.service.js            → POST to configured LLM (Groq/Gemini/OpenRouter/Ollama)
+
+┌── Agentic Mode ────────────────────────────────────────┐
+│ EnforcedOrchestrator:                                   │
+│   1. Filter high-signal files (.js, .ts, .py, etc.)    │
+│   2. Security gate (regex audit + SecurityAgent)        │
+│   3. [Optional] graphify → knowledge graph             │
+│   4. RepoAnalyzerAgent (project nature classification)  │
+│   5. selectTemplate() (deterministic)                   │
+│   6. DiagramAgent (two-pass Mermaid generation)         │
+│   7. CodeIntelligenceAgent (semantic understanding)     │
+│   8. WriterAgent (parallel section generation)          │
+└────────────────────────────────────────────────────────┘
+                      │
+┌── Classic Mode ─────────────────────────────────────────┐
+│ ast-parser.service.js → Extract syntax signatures       │
+│ llm-input-builder.service.js → Build prompt (chunks)    │
+│ llm.service.js → POST to configured LLM (Groq/Gemini/… )│
+└────────────────────────────────────────────────────────┘
     ↓
 SanitizerSession          → reintegrate() swaps vault tokens back to original values
     ↓
-Documentation output      → Returned to client or written to docs/
+Documentation output      → Returned to client, saved to disk, or published to Pages
 ```
 
 ---

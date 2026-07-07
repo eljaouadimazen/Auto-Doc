@@ -23,7 +23,7 @@
     "@langchain/groq": "^1.1.5",
     "@langchain/openai": "^1.4.5",
     "@octokit/rest": "^19.0.7",
-    "@pinecone-database/pinecone": "^7.1.0",
+    "@rive-app/react-canvas": "^4.29.3",
     "axios": "^1.16.1",
     "dompurify": "^3.4.11",
     "dotenv": "^16.0.3",

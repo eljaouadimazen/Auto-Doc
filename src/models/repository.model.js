@@ -123,15 +123,15 @@ class Repository {
 
     try {
       if (mode === 'agentic') {
-        const orchestrator = new EnforcedOrchestrator({
-          onProgress: (p) => console.info(`[Pipeline Stage ${p.stage}]`, p.message),
-          session
-        });
+        const userProgress = options.onProgress;
+        const onProgress = userProgress || ((p) => console.info(`[Pipeline Stage ${p.stage}]`, p.message));
+        const { onProgress: _omit, ...restOptions } = options;
+        const orchestrator = new EnforcedOrchestrator({ onProgress, session });
         const runId = protocol.generateRunId();
         const input = protocol.buildInput(
           `Generate Enforced Documentation for ${this.#name}`,
           { repository: this.#name, runId, apiKey: provider === 'ollama' ? null : apiKey, provider },
-          { files: sanitizedFiles, provider, docType, targetAudience, ...options }
+          { files: sanitizedFiles, provider, docType, targetAudience, ...restOptions }
         );
 
         const output = await orchestrator.run(input);

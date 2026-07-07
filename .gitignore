@@ -10,6 +10,9 @@ dist/
 build/
 .next/
 
+# Vite build output (mermaid chunk artifacts)
+public/assets/
+
 # Env
 .env
 .env.*
@@ -27,3 +30,6 @@ Thumbs.db
 # IDE
 .vscode/
 .idea/
+
+# opencode config (per-project)
+.opencode/

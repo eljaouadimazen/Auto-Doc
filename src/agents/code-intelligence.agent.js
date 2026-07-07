@@ -27,7 +27,7 @@ Be precise and concise. If something is unclear from the code, say so explicitly
       }
     );
 
-    this.SUPPORTED = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.py', '.java', '.go'];
+    this.SUPPORTED = ['.js', '.jsx', '.ts', '.tsx', '.mjs', '.cjs', '.py', '.java', '.go', '.kt', '.rb', '.php', '.rs', '.dart', '.swift', '.scala', '.vue', '.svelte', '.html', '.css', '.scss', '.xml', '.yaml', '.yml', '.properties', '.gradle', '.sql', '.prisma', '.tf', '.kt', '.gradle.kts'];
   }
 
   /**
@@ -37,7 +37,7 @@ Be precise and concise. If something is unclear from the code, say so explicitly
    * @param {string} agentInput.input.content - File content
    */
   async execute(agentInput) {
-    const { path, content } = agentInput.input;
+    const { path, content, relatedFiles } = agentInput.input;
 
     const ext = path.slice(path.lastIndexOf('.')).toLowerCase();
 
@@ -49,15 +49,25 @@ Be precise and concise. If something is unclear from the code, say so explicitly
       return this.buildFallback(path, content, 'File too small');
     }
 
-    const truncated = this.truncate(content, 2500);
-    const prompt    = this.buildPrompt(path, truncated);
-    const fallback  = this.buildFallback(path, content, 'JSON parse failed');
-    const result    = await this.callLLMJSON(prompt, fallback);
+    const truncated  = this.truncate(content, 2500);
+    const relatedCtx = this.buildRelatedContext(relatedFiles);
+    const prompt     = this.buildPrompt(path, truncated, relatedCtx);
+    const fallback   = this.buildFallback(path, content, 'JSON parse failed');
+    const result     = await this.callLLMJSON(prompt, fallback);
 
     return this.normalize(result, path);
   }
 
-  buildPrompt(filePath, content) {
+  buildRelatedContext(relatedFiles) {
+    if (!relatedFiles || relatedFiles.length === 0) return '';
+    const entries = relatedFiles.map(r => {
+      const type = r.relationType ? ` — ${r.relationType}` : '';
+      return `  ${r.path}${type}`;
+    }).join('\n');
+    return `\nRelated files (connected via knowledge graph):\n${entries}\n`;
+  }
+
+  buildPrompt(filePath, content, relatedCtx = '') {
     return `Analyze this source code file and return a JSON object.
 
 File: ${filePath}
@@ -65,13 +75,13 @@ File: ${filePath}
 \`\`\`
 ${content}
 \`\`\`
-
+${relatedCtx}
 Return ONLY this JSON (no markdown, no explanation):
 {
   "path": "${filePath}",
-  "language": "JavaScript | TypeScript | Python | etc",
+  "language": "JavaScript | TypeScript | Python | Java | Go | etc",
   "purpose": "One sentence — what this file does",
-  "type": "controller | service | middleware | utility | config | test | other",
+  "type": "controller | service | middleware | utility | config | test | component | guard | interceptor | pipe | directive | module | model | repository | other",
   "responsibilities": ["what", "this", "file", "handles"],
   "classes": [
     {
@@ -93,6 +103,27 @@ Return ONLY this JSON (no markdown, no explanation):
   "envVars": ["ENV_VAR_NAMES"],
   "securityRelevant": false,
   "securityNotes": "Any security observations or empty string",
+  "authMechanisms": ["jwt | oauth | session | apiKey | basic | none"],
+  "authLibraries": ["jsonwebtoken | passport | bcrypt | argon2 | spring-security | none"],
+  "apiCalls": [
+    { "method": "GET", "url": "/api/resource", "source": "fetch | axios | httpClient" }
+  ],
+  "configVars": ["CONFIG_KEY"],
+  "framework": "express | spring | django | react | angular | vue | none",
+  "frontendFramework": "react | angular | vue | svelte | null",
+  "componentType": "page | component | service | guard | interceptor | pipe | directive | module | null",
+  "hasAuthGuard": false,
+  "hasInterceptor": false,
+  "parentComponent": "ParentComponentName or null",
+  "childComponents": ["ChildComponentName"],
+  "testFiles": ["related test file paths"],
+  "dbEntities": [
+    { "name": "EntityName", "fields": ["field1", "field2"] }
+  ],
+  "dbTechnology": "postgresql | mongodb | mysql | sqlite | null",
+  "ormLibrary": "prisma | mongoose | typeorm | sequelize | hibernate | spring-data | null",
+  "deploymentConfig": ["Dockerfile | docker-compose.yml | .github/workflows"],
+  "webSocketPaths": ["/ws/path"],
   "keyDecisions": ["design decisions visible in code"],
   "complexity": "low | medium | high",
   "summary": "2-3 sentences describing this file for documentation purposes"
@@ -114,6 +145,23 @@ Return ONLY this JSON (no markdown, no explanation):
       envVars:              result.envVars             || [],
       securityRelevant:     result.securityRelevant    ?? false,
       securityNotes:        result.securityNotes       || '',
+      authMechanisms:       result.authMechanisms      || [],
+      authLibraries:        result.authLibraries       || [],
+      apiCalls:             result.apiCalls            || [],
+      configVars:           result.configVars          || [],
+      framework:            result.framework           || 'unknown',
+      frontendFramework:    result.frontendFramework   || null,
+      componentType:        result.componentType       || null,
+      hasAuthGuard:         result.hasAuthGuard        ?? false,
+      hasInterceptor:       result.hasInterceptor      ?? false,
+      parentComponent:      result.parentComponent     || null,
+      childComponents:      result.childComponents     || [],
+      testFiles:            result.testFiles           || [],
+      dbEntities:           result.dbEntities           || [],
+      dbTechnology:         result.dbTechnology        || null,
+      ormLibrary:           result.ormLibrary          || null,
+      deploymentConfig:     result.deploymentConfig    || [],
+      webSocketPaths:       result.webSocketPaths      || [],
       keyDecisions:         result.keyDecisions        || [],
       complexity:           result.complexity          || 'medium',
       summary:              result.summary             || ''
@@ -135,6 +183,23 @@ Return ONLY this JSON (no markdown, no explanation):
       envVars:              [],
       securityRelevant:     false,
       securityNotes:        '',
+      authMechanisms:       [],
+      authLibraries:        [],
+      apiCalls:             [],
+      configVars:           [],
+      framework:            'unknown',
+      frontendFramework:    null,
+      componentType:        null,
+      hasAuthGuard:         false,
+      hasInterceptor:       false,
+      parentComponent:      null,
+      childComponents:      [],
+      testFiles:            [],
+      dbEntities:           [],
+      dbTechnology:         null,
+      ormLibrary:           null,
+      deploymentConfig:     [],
+      webSocketPaths:       [],
       keyDecisions:         [],
       complexity:           'low',
       summary:              reason

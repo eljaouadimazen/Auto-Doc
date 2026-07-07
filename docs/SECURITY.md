@@ -11,7 +11,7 @@
 
 ## Vault-Based Anonymization Pipeline
 
-The `SanitizerService` uses a **vault-based token anonymization** approach instead of destructive redaction. This is a two-phase pipeline:
+The system uses a **vault-based token anonymization** approach instead of destructive redaction. `SanitizerService` holds the pattern registry and `SanitizerSession` (per-request) performs the anonymization. This is a two-phase pipeline:
 
 ### Phase 1 — Anonymize (before LLM)
 Secrets are replaced with **stable vault tokens** that preserve contextual meaning:
@@ -26,15 +26,17 @@ The vault (`Map<token, originalValue>`) is cleared between requests via `resetVa
 ### Phase 2 — Reintegrate (after LLM)
 After the LLM generates documentation, `reintegrate(llmOutput)` swaps every token back to its original value **locally on the server**. The mapping never leaves the server — the LLM never sees real secrets.
 
-### Key Methods
+### Key Methods (on `SanitizerSession`)
 
-| Method | Description |
-|--------|-------------|
-| `anonymize(text)` | Scans text, replaces secrets with vault tokens, returns anonymized text |
-| `reintegrate(text)` | Swaps vault tokens back to original values in LLM output |
-| `resetVault()` | Clears the vault between requests (session isolation) |
-| `audit(text)` | Returns list of matched pattern names without modifying text |
-| `detectHighEntropyStrings(text)` | Shannon entropy pass for secrets no regex matched |
+| Method | Class | Description |
+|--------|-------|-------------|
+| `anonymize(text)` | `SanitizerSession` | Scans text, replaces secrets with vault tokens, returns anonymized text |
+| `reintegrate(text)` | `SanitizerSession` | Swaps vault tokens back to original values in LLM output |
+| `audit(text)` | `SanitizerSession` | Returns list of matched pattern names without modifying text (read-only, no vault population) |
+| `destroy()` | `SanitizerSession` | Clears the vault and frees memory (session isolation) |
+| `getVaultSnapshot()` | `SanitizerSession` | Returns a read-only, truncated view of active tokens (values >40 chars are clipped) |
+
+**Note:** `SanitizerService` is a singleton that holds the pattern registry and provides `createSession()` to instantiate per-request `SanitizerSession` objects. All anonymization happens at the session level.
 
 ### All detected values are tokenized — never sent raw to any LLM.
 
