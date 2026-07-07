@@ -23,10 +23,11 @@ export default defineConfig({
       '/rules':        'http://localhost:3000',
       '/health':       'http://localhost:3000',
       '/publish':      'http://localhost:3000',
+      '/job':          'http://localhost:3000',
     }
   },
   build: {
-    outDir: 'public',
+    outDir: '../public',
     emptyOutDir: true,
   }
 })

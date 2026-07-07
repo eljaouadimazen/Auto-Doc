@@ -8,12 +8,30 @@
  * dramatically reducing token usage while improving LLM output quality.
  */
 const LOGIC_PATTERNS = {
-  database:  /db\.|repository\.|prisma\.|mongoose\.|select\s+from|insert\s+into|update\s+|delete\s+from/i,
-  security:  /bcrypt|argon2|jwt\.sign|jwt\.verify|crypto\.|password|hash|compare/i,
-  network:   /fetch\(|axios\.|http\.|request\(|api\./i,
-  validation: /validate|joi\.|zod\.|check\(|isEmail|isURL/i,
-  fileSystem: /fs\.|path\.|readFile|writeFile|storage\./i,
-  messaging: /emit\(|on\(|publish|subscribe|kafka|rabbitmq/i
+  database:    /db\.|repository\.|prisma\.|mongoose\.|select\s+from|insert\s+into|update\s+|delete\s+from|@Entity|@Table|@Column|@ManyToOne|@OneToMany|schema\s*[:=]/i,
+  security:    /bcrypt|argon2|jwt\.sign|jwt\.verify|crypto\.|password|hash|compare/i,
+  network:     /fetch\(|axios\.|http\.|request\(|api\./i,
+  validation:  /validate|joi\.|zod\.|check\(|isEmail|isURL|@NotBlank|@NotNull|@Size|@Pattern|class-validator/i,
+  fileSystem:  /fs\.|path\.|readFile|writeFile|storage\./i,
+  messaging:   /emit\(|on\(|publish|subscribe|kafka|rabbitmq|@WebSocket|websocket|socket\./i,
+  auth_jwt:    /jsonwebtoken|jwt\.sign|jwt\.verify|JwtService|@JwtAuth|jwt\s*[:=]/i,
+  auth_oauth:  /passport|OAuth2|oauth2|@OAuth|socialite|google-auth|github-auth/i,
+  auth_session:/express-session|cookie-parser|session\(|@Session/i,
+  auth_guard:  /CanActivate|@Guard|AuthGuard|RequireAuth|isAuthenticated|ensureAuthenticated/i,
+  auth_interceptor: /HttpInterceptor|@Interceptor|axios\.interceptors|httpInterceptor/i,
+  auth_password:/bcrypt|argon2|PasswordEncoder|@Password|PBKDF2|scrypt/i,
+  auth_role:   /@Role|@HasRole|@PreAuthorize|hasRole|hasAuthority|@Secured|role_/i,
+  frontend_angular: /@Component|@NgModule|@Injectable|@Directive|@Pipe|RouterModule|HttpClientModule|FormsModule|ReactiveFormsModule/i,
+  frontend_react:   /useState|useEffect|useContext|useReducer|createContext|Provider|jsx|tsx/i,
+  frontend_vue:     /Vue\.component|vue-router|createApp|v-model|v-bind|v-for|npx\s*vue/i,
+  frontend_guard:   /AuthGuard|CanActivate|CanActivateChild|RouteGuard/i,
+  api_rest:    /@RestController|@RequestMapping|@GetMapping|@PostMapping|@PutMapping|@DeleteMapping|router\.(get|post|put|delete|patch)/i,
+  api_graphql: /GraphQL|graphql|@Query|@Mutation|@Resolver|ApolloClient|gql\s*`/i,
+  orm:         /@Entity|prisma\.|mongoose\.|typeorm|sequelize|hibernate|spring-data|repository\.save|repository\.find/i,
+  config:      /@Value|@ConfigurationProperties|application\.properties|\.env|process\.env|app\.config|config\(\)/i,
+  test:        /describe\(|it\(|test\(|expect\(|assert\.|@Test|jest\.|beforeEach|afterEach/i,
+  deploy:      /Dockerfile|docker-compose|\.github\/workflows|render\.yaml|heroku|kubernetes|helm/i,
+  error_handling: /@ControllerAdvice|@ExceptionHandler|ErrorHandler|catch\(|try\s*\{|error\.message|res\.status\(\d{3}\)/i
 };
 
 class ASTParserService {
@@ -60,6 +78,17 @@ class ASTParserService {
       jsdoc:          this.extractJSDoc(content),
       expressRoutes:  this.extractExpressRoutes(content),
       envAccess:      this.extractEnvAccess(content),
+      authMechanisms: this.extractAuthMechanisms(content),
+      authLibraries:  this.extractAuthLibraries(content),
+      apiCalls:       this.extractApiCalls(content),
+      frontendFramework: this.extractFrontendFramework(content),
+      componentType:     this.extractComponentType(content),
+      parentChild:     this.extractParentChildComponents(content),
+      errorHandling:   this.extractErrorHandling(content),
+      deploymentConfig: this.extractDeploymentConfig(content),
+      dbEntities:       this.extractDbEntities(content),
+      dbTechnology:     this.extractDbTechnology(content),
+      ormLibrary:       this.extractOrmLibrary(content),
     };
   }
 
@@ -344,6 +373,194 @@ extractLogicSignals(code) {
     return content.slice(openIdx);
   }
 
+  // ─────────────────────────────────────────────
+  // AUTH DETECTION
+  // ─────────────────────────────────────────────
+
+  extractAuthMechanisms(content) {
+    const mechanisms = [];
+    if (/jsonwebtoken|jwt\.sign|jwt\.verify|JwtService|@JwtAuth/.test(content)) mechanisms.push('jwt');
+    if (/passport|OAuth2|oauth2/.test(content)) mechanisms.push('oauth');
+    if (/express-session|cookie-parser|session\(/.test(content)) mechanisms.push('session');
+    if (/x-api-key|apiKey/.test(content)) mechanisms.push('apiKey');
+    if (/passport|BasicAuth|basic-auth/.test(content)) mechanisms.push('basic');
+    if (/Keycloak|Auth0|Firebase|Supabase/.test(content)) mechanisms.push('third-party');
+    return mechanisms;
+  }
+
+  extractAuthLibraries(content) {
+    const libs = [];
+    if (/jsonwebtoken/.test(content)) libs.push('jsonwebtoken');
+    if (/passport/.test(content)) libs.push('passport');
+    if (/bcrypt/.test(content)) libs.push('bcrypt');
+    if (/argon2/.test(content)) libs.push('argon2');
+    if (/(spring-security|@PreAuthorize|@Secured)/.test(content)) libs.push('spring-security');
+    if (/(express-session)/.test(content)) libs.push('express-session');
+    if (/(helmet)/.test(content)) libs.push('helmet');
+    if (/(cors)/.test(content)) libs.push('cors');
+    return libs;
+  }
+
+  // ─────────────────────────────────────────────
+  // API CALL DETECTION
+  // ─────────────────────────────────────────────
+
+  extractApiCalls(content) {
+    const calls = [];
+    const patterns = [
+      { method: null,   regex: /fetch\(['"`]([^'"`]+)['"`]/g,         source: 'fetch' },
+      { method: null,   regex: /axios\.(get|post|put|patch|delete)\(['"`]([^'"`]+)['"`]/g, source: 'axios' },
+      { method: null,   regex: /this\.http\.(get|post|put|patch|delete)\(['"`]([^'"`]+)['"`]/g, source: 'httpClient' },
+      { method: null,   regex: /api\.(get|post|put|patch|delete)\(['"`]([^'"`]+)['"`]/g, source: 'apiService' },
+      { method: null,   regex: /\$http\.(get|post|put|patch|delete)\(['"`]([^'"`]+)['"`]/g, source: '$http' },
+      { method: null,   regex: /axios\(['"`]([^'"`]+)['"`]/g,         source: 'axios' },
+    ];
+    patterns.forEach(p => {
+      p.regex.lastIndex = 0;
+      let m;
+      while ((m = p.regex.exec(content)) !== null) {
+        if (p.method && m[1]) {
+          calls.push({ method: m[1].toUpperCase(), url: m[2], source: p.source });
+        } else if (!p.method && m[1]) {
+          calls.push({ method: 'GET', url: m[1], source: p.source });
+        }
+      }
+    });
+    return calls;
+  }
+
+  // ─────────────────────────────────────────────
+  // FRONTEND DETECTION
+  // ─────────────────────────────────────────────
+
+  extractFrontendFramework(content) {
+    if (/@Component|@NgModule|RouterModule|HttpClientModule/.test(content)) return 'angular';
+    if (/useState|useEffect|createContext|jsx/.test(content)) return 'react';
+    if (/Vue\.component|createApp|v-model/.test(content)) return 'vue';
+    if (/svelte|onMount/.test(content)) return 'svelte';
+    return null;
+  }
+
+  extractComponentType(content) {
+    if (/@Component/.test(content)) return 'component';
+    if (/@NgModule/.test(content)) return 'module';
+    if (/@Injectable/.test(content)) return 'service';
+    if (/@Directive/.test(content)) return 'directive';
+    if (/@Pipe/.test(content)) return 'pipe';
+    if (/(CanActivate|AuthGuard|@Guard)/.test(content)) return 'guard';
+    if (/HttpInterceptor|@Interceptor/.test(content)) return 'interceptor';
+    if (/export\s+default\s+function\s+\w+/.test(content) && /useState|useEffect/.test(content)) return 'component';
+    if (/defineComponent|Vue\.component/.test(content)) return 'component';
+    return null;
+  }
+
+  extractParentChildComponents(content) {
+    const parent = content.match(/@Component\s*\(\s*[\s\S]*?selector\s*:\s*['"`]([^'"`]+)['"`]/);
+    return {
+      parentComponent: parent ? parent[1] : null,
+      childComponents: []
+    };
+  }
+
+  // ─────────────────────────────────────────────
+  // ERROR HANDLING DETECTION
+  // ─────────────────────────────────────────────
+
+  extractErrorHandling(content) {
+    const patterns = [];
+    if (/@ControllerAdvice/.test(content)) patterns.push('@ControllerAdvice');
+    if (/@ExceptionHandler/.test(content)) patterns.push('@ExceptionHandler');
+    if (/(ErrorHandler|GlobalErrorHandler)/.test(content)) patterns.push('GlobalErrorHandler');
+    if (/res\.status\(\d{3}\)/.test(content)) patterns.push('HTTP status codes');
+    if (/try\s*\{/.test(content)) patterns.push('try-catch');
+    if (/validate|joi|zod/.test(content)) patterns.push('input validation');
+    return patterns;
+  }
+
+  // ─────────────────────────────────────────────
+  // DEPLOYMENT DETECTION
+  // ─────────────────────────────────────────────
+
+  extractDeploymentConfig(content) {
+    const configs = [];
+    if (/Dockerfile/.test(content)) configs.push('Dockerfile');
+    if (/docker-compose/.test(content)) configs.push('docker-compose.yml');
+    if (/\.github\/workflows/.test(content)) configs.push('GitHub Actions');
+    if (/render\.yaml/.test(content)) configs.push('render.yaml');
+    if (/heroku/.test(content)) configs.push('Heroku');
+    if (/kubernetes|k8s|helm/.test(content)) configs.push('Kubernetes');
+    if (/nginx/.test(content)) configs.push('Nginx');
+    return configs;
+  }
+
+  // ─────────────────────────────────────────────
+  // DATABASE ENTITY DETECTION
+  // ─────────────────────────────────────────────
+
+  extractDbEntities(content) {
+    const entities = [];
+    // JPA-style: @Entity class User { ... }
+    const jpaRegex = /@Entity[\s\S]*?class\s+(\w+)/g;
+    let m;
+    while ((m = jpaRegex.exec(content)) !== null) {
+      const fields = [];
+      const fieldRegex = /@(Column|Id|GeneratedValue|ManyToOne|OneToMany|OneToOne|JoinColumn)[\s\S]*?(?:private|public|protected)\s+(\w+)\s+(\w+)/g;
+      let fm;
+      while ((fm = fieldRegex.exec(content)) !== null) {
+        fields.push(fm[3]);
+      }
+      // Also detect plain fields after entity
+      const plainFieldRegex = /(?:private|public|protected)\s+(\w+)\s+(\w+)\s*;/g;
+      let pf;
+      while ((pf = plainFieldRegex.exec(content)) !== null) {
+        if (!fields.includes(pf[2]) && pf[1] !== 'class') fields.push(pf[2]);
+      }
+      entities.push({ name: m[1], fields });
+    }
+    // Mongoose-style: const userSchema = new Schema({ ... })
+    const mongoRegex = /const\s+(\w+)\s*=\s*new\s+Schema\s*\(\s*\{/g;
+    while ((m = mongoRegex.exec(content)) !== null) {
+      const fields = [];
+      const fieldRegex = /\s+(\w+)\s*:\s*\{\s*type\s*:/g;
+      let fm;
+      while ((fm = fieldRegex.exec(content)) !== null) fields.push(fm[1]);
+      entities.push({ name: m[1].replace(/Schema/i, ''), fields });
+    }
+    // Prisma-style
+    const prismaRegex = /model\s+(\w+)\s*\{/g;
+    while ((m = prismaRegex.exec(content)) !== null) {
+      const fields = [];
+      const fieldRegex = /^\s+(\w+)\s+\w+/gm;
+      let fm;
+      while ((fm = fieldRegex.exec(content)) !== null) fields.push(fm[1]);
+      entities.push({ name: m[1], fields });
+    }
+    return entities;
+  }
+
+  extractDbTechnology(content) {
+    if (/postgres|pg\s*[:=]|psql/i.test(content)) return 'postgresql';
+    if (/mysql/i.test(content)) return 'mysql';
+    if (/sqlite/i.test(content)) return 'sqlite';
+    if (/mongodb|mongoose|ObjectId|MongoClient/i.test(content)) return 'mongodb';
+    if (/redis/i.test(content)) return 'redis';
+    if (/mariadb/i.test(content)) return 'mariadb';
+    if (/oracle/i.test(content)) return 'oracle';
+    if (/sqlserver|mssql/i.test(content)) return 'sqlserver';
+    return null;
+  }
+
+  extractOrmLibrary(content) {
+    if (/prisma/i.test(content)) return 'prisma';
+    if (/mongoose/i.test(content)) return 'mongoose';
+    if (/typeorm|TypeORM/i.test(content)) return 'typeorm';
+    if (/sequelize/i.test(content)) return 'sequelize';
+    if (/spring-data|JpaRepository|CrudRepository/i.test(content)) return 'spring-data-jpa';
+    if (/hibernate/i.test(content)) return 'hibernate';
+    if (/(EntityManager|@PersistenceContext)/i.test(content)) return 'jpa';
+    return null;
+  }
+
   /**
    * Convert AST result to a compact text summary for the LLM prompt
    * Much cheaper than sending raw code
@@ -356,14 +573,28 @@ extractLogicSignals(code) {
     file:   file.path,
     nature: a.language,
     deps:   (a.imports || []).map(i => i.specifier || i.module).filter(Boolean).slice(0, 5),
-    routes: a.expressRoutes || [],          // undefined on Python files
+    routes: a.expressRoutes || [],
+    auth: {
+      mechanisms: a.authMechanisms || [],
+      libraries:  a.authLibraries  || []
+    },
+    apiCalls: (a.apiCalls || []).slice(0, 8),
+    frontend: {
+      framework: a.frontendFramework || null,
+      componentType: a.componentType || null
+    },
+    db: {
+      entities:   (a.dbEntities || []).slice(0, 5),
+      technology: a.dbTechnology || null,
+      orm:        a.ormLibrary   || null
+    },
     logic: {
       classes: (a.classes || []).map(c => ({
         name:    c.name,
         methods: (c.methods || []).map(m => ({
           sig:  `${m.name}(${(m.params || []).join(',')})`,
-          tags: m.logicSignals || [],       // undefined on Python methods
-          hint: (m.preview || '').slice(0, 100)  // undefined on Python methods
+          tags: m.logicSignals || [],
+          hint: (m.preview || '').slice(0, 100)
         }))
       })),
       functions: (a.functions || []).map(f => ({
@@ -371,7 +602,9 @@ extractLogicSignals(code) {
         tags: this.extractLogicSignals(file.content || '')
       }))
     },
-    env: a.envAccess || []
+    env:     a.envAccess       || [],
+    deploy:  a.deploymentConfig || [],
+    errors:  a.errorHandling   || []
   };
 
   return JSON.stringify(summary);

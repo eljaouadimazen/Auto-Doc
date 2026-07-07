@@ -12,15 +12,15 @@ export default function AuditPanel({ auditSummary }) {
     return (
       <Card className="mt-6 border-border bg-card/60 backdrop-blur-sm">
         <CardContent className="p-6">
-          <div className="flex items-center gap-2 mb-2">
-            <span className="text-base w-8 h-8 flex items-center justify-center bg-muted/50 border border-border rounded-lg shrink-0">🔒</span>
-            <h3 className="text-sm font-semibold m-0 text-foreground">Audit Logs</h3>
-          </div>
-          <div className="text-center py-4 text-xs text-muted-foreground font-mono">
-            No audit logs available. Run the pipeline to generate audit data.
-          </div>
-        </CardContent>
-      </Card>
+            <div className="flex items-center gap-2 mb-2">
+              <span className="text-base w-8 h-8 flex items-center justify-center bg-muted/50 border border-border rounded-lg shrink-0">🔒</span>
+              <h3 className="text-sm font-semibold m-0 text-foreground">Audit Logs</h3>
+            </div>
+            <div className="text-center py-4 text-xs text-muted-foreground font-mono">
+              No audit logs available. Run the pipeline to generate audit data.
+            </div>
+          </CardContent>
+        </Card>
     )
   }
 
@@ -28,8 +28,8 @@ export default function AuditPanel({ auditSummary }) {
   const hasIssues = totalRedacted > 0
 
   return (
-    <Card className="mt-6 border-border bg-card/60 backdrop-blur-sm">
-      <CardContent className="p-6">
+      <Card className="mt-6 border-border bg-card/60 backdrop-blur-sm">
+        <CardContent className="p-6">
         <div className="flex items-center gap-2 mb-3">
           <span className="text-base w-8 h-8 flex items-center justify-center bg-muted/50 border border-border rounded-lg shrink-0">
             {hasIssues ? '🔒' : '🛡️'}

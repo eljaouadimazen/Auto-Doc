@@ -14,7 +14,7 @@ class RepoAnalyzerAgent extends BaseAgent {
   }
 
   async execute(agentInput) {
-    const { files = [], repository } = agentInput.input;
+    const { files = [], repository, graphContext } = agentInput.input;
 
     // Detect executable code from extensions directly — no AST needed
     const hasExecutableCode = files.some(f =>
@@ -30,6 +30,14 @@ class RepoAnalyzerAgent extends BaseAgent {
       .map(f => `[${f.path}]\n${f.snippet || '(no content)'}`)
       .join('\n---\n');
 
+    const graphSummary = graphContext && graphContext.totalCommunities > 0
+      ? `\nDependency graph analysis: The codebase splits into ${graphContext.totalCommunities} communities/modules:\n${
+          graphContext.communities.map(c =>
+            `  - Community ${c.communityId}: ${c.fileCount} files — e.g. ${c.sampleFiles.join(', ')}`
+          ).join('\n')
+        }\nThis structure helps distinguish monorepos from modular monoliths or simple applications.\n`
+      : '';
+
     const prompt = `
 You are analyzing the following repository: "${repository}"
 
@@ -37,27 +45,45 @@ Below are the file paths and code snippets from the most important files:
 
 ${fileContext}
 
-Has executable code files: ${hasExecutableCode}
+Has executable code files: ${hasExecutableCode}${graphSummary}
 
 Based on the actual file contents above, determine:
 1. What kind of project this is
-2. What technology stack is being used (framework, language, DB, etc.)
+2. What technology stack is being used (framework, language, DB, build tool, etc.)
 3. What the key logic signals are (e.g. "express routes", "spring controllers", "JWT auth", "REST API", "WebSocket", "database ORM")
 
 Classification rules:
 - If you see Spring/Java controllers, services, repositories → "BACKEND"
 - If you see Express/Fastify routes or NestJS → "BACKEND"  
-- If you see React/Vue/Angular components → "FRONTEND"
+- If you see React/Vue/Angular/Svelte components → "FRONTEND"
+- If you see both backend and frontend code → "FULLSTACK"
 - If you see Dockerfile, terraform, k8s yamls → "DEVOPS"
 - If mostly .md files with no real code → "RESOURCE_LIST"
 - If it exports reusable functions/classes with no server → "LIBRARY"
 
+For techStack, be specific about:
+- Language: Node.js, Java, Python, Go, etc.
+- Framework: Express.js, Spring Boot, React, Angular, Vue, etc.
+- Build tool: npm, Maven, Gradle, yarn, pnpm, etc.
+- Database: PostgreSQL, MongoDB, MySQL, etc.
+- ORM: Prisma, Mongoose, Hibernate, TypeORM, etc.
+- Testing: Jest, JUnit, Mocha, Cypress, etc.
+- Container: Docker, docker-compose, Kubernetes
+- CI/CD: GitHub Actions, GitLab CI, Jenkins, etc.
+
+For logicSignals, include specific technical patterns found:
+- Auth: JWT authentication, OAuth, session-based auth, bcrypt passwords
+- Architecture: REST controllers, GraphQL, WebSocket, microservices
+- Frontend: component-based, state management, routing, guards
+- Database: ORM, migrations, relationships
+- Infrastructure: Docker, CI/CD, cloud deployment
+
 Return ONLY this JSON object:
 {
-  "projectNature": "BACKEND | FRONTEND | DEVOPS | RESOURCE_LIST | LIBRARY",
+  "projectNature": "BACKEND | FRONTEND | FULLSTACK | DEVOPS | RESOURCE_LIST | LIBRARY",
   "hasExecutableCode": boolean,
-  "techStack": ["list of detected technologies, frameworks, languages"],
-  "logicSignals": ["specific signals found e.g. JWT authentication, REST controllers, WebSocket, Spring Security"],
+  "techStack": ["specific: Node.js", "Express.js", "React", "PostgreSQL", "Prisma", "Jest", "Docker", "GitHub Actions"],
+  "logicSignals": ["specific: express routes", "JWT authentication", "REST API", "WebSocket", "React components"],
   "summary": "One precise sentence describing what this project actually does"
 }`;
 

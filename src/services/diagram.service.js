@@ -69,8 +69,8 @@ class DiagramService {
         secondary: ['middleware', 'handler', 'manager', 'factory', 'adapter', 'dto', 'interface']
       },
       COMPONENT: {
-        primary:   ['component', 'screen', 'page', 'view', 'widget', 'container'],
-        secondary: ['context', 'provider', 'hook', 'store', 'layout', 'modal', 'form']
+        primary:   ['component', 'screen', 'page', 'view', 'widget', 'container', 'service', 'api', 'http', 'store'],
+        secondary: ['context', 'provider', 'hook', 'store', 'layout', 'modal', 'form', 'guard', 'interceptor', 'pipe', 'directive', 'module', 'model', 'dto']
       },
       PIPELINE: {
         primary:   ['.github/workflows', 'jenkinsfile', 'pipeline', 'deploy', 'dockerfile', 'docker-compose'],

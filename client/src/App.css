@@ -117,13 +117,13 @@
 .doc-viewer-content code {
   font-family: ui-monospace, monospace;
   font-size: 0.875rem;
-  background: rgba(30, 41, 59, 0.08);
+  background: var(--doc-bg-code, rgba(30, 41, 59, 0.08));
   padding: 2px 6px;
   border-radius: 4px;
 }
 .doc-viewer-content pre {
   margin: 0 0 16px;
-  background: #f1f5f9;
+  background: var(--doc-bg-code, #f1f5f9);
   border: 1px solid var(--border, hsl(217.2 32.6% 17.5%));
   border-radius: 8px;
   overflow-x: auto;
@@ -141,15 +141,15 @@
   padding: 8px 12px; border: 1px solid var(--border, hsl(217.2 32.6% 17.5%));
   text-align: left;
 }
-.doc-viewer-content th { background: #f8fafc; font-weight: 600; }
+.doc-viewer-content th { background: var(--doc-bg-th, #f8fafc); font-weight: 600; }
 .doc-viewer-content img { max-width: 100%; border-radius: 8px; margin: 16px 0; }
 .doc-viewer-content hr { margin: 32px 0; border: none; border-top: 1px solid var(--border, hsl(217.2 32.6% 17.5%)); }
 .doc-viewer-content mark {
-  background: #fef3c7;
+  background: var(--doc-bg-mark, #fef3c7);
   padding: 1px 2px; border-radius: 2px;
 }
 .doc-viewer-content .mermaid-container {
-  background: #1e293b;
+  background: var(--doc-bg-mermaid, #1e293b);
   border: 1px solid var(--border, hsl(217.2 32.6% 17.5%));
   border-radius: 8px;
   padding: 24px; margin: 16px 0;

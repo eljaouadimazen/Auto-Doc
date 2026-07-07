@@ -8,6 +8,7 @@ const sessionStore     = require('../services/sanitizer-session-store');
 const { sanitizeLog }  = require('../services/log-sanitizer');
 const auditStore       = require('../services/audit-store.service');
 const PdfGeneratorService = require('../services/pdf-generator.service');
+const jobQueue         = require('../services/job-queue.service');
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
@@ -125,10 +126,11 @@ class GeneratorController {
       const apiKey   = req.headers['x-api-key'] || null;
       const { chunks, messages, files, repoName } = req.body;
 
-      const docType         = req.body.docType         || 'README';
-      const targetAudience  = req.body.targetAudience  || 'DEVELOPER';
-      const businessModel   = req.body.businessModel   || '';
-      const projectProgress = req.body.projectProgress || '';
+      const docType           = req.body.docType           || 'README';
+      const targetAudience    = req.body.targetAudience    || 'DEVELOPER';
+      const forbiddenSections = req.body.forbiddenSections || [];
+      const businessModel     = req.body.businessModel     || '';
+      const projectProgress   = req.body.projectProgress   || '';
 
       // ── AGENTIC MODE ──────────────────────────────────────────────────
       if (mode === 'agentic') {
@@ -138,17 +140,73 @@ class GeneratorController {
           });
         }
 
+        const githubUrl = req.body.githubUrl;
+
+        // If graphify is needed, run as async job (it can take minutes)
+        if (githubUrl) {
+          const repository = Repository.fromDTO(repoName, files);
+          const jobId = jobQueue.create(async (progressRef) => {
+            const docs = await repository.GenerateDocumentation(mode, provider, apiKey, {
+              projectNature:     req.body.projectNature,
+              logicSignals:      req.body.logicSignals,
+              hasExecutableCode: req.body.hasExecutableCode,
+              techStack:         req.body.techStack,
+              docType,
+              targetAudience,
+              forbiddenSections,
+              businessModel,
+              projectProgress,
+              githubUrl,
+              onProgress: (p) => {
+                if (progressRef) progressRef.current = p;
+              }
+            });
+            return {
+              documentation: docs.content,
+              stats:         docs.stats,
+            };
+          });
+
+          return res.status(202).json({
+            jobId,
+            status: 'pending',
+            message: 'Documentation generation started — poll GET /job/:jobId for status'
+          });
+        }
+
         const repository = Repository.fromDTO(repoName, files);
-        const docs       = await repository.GenerateDocumentation(mode, provider, apiKey, {
+        const baseOptions = {
           projectNature:     req.body.projectNature,
           logicSignals:      req.body.logicSignals,
           hasExecutableCode: req.body.hasExecutableCode,
           techStack:         req.body.techStack,
           docType,
           targetAudience,
+          forbiddenSections,
           businessModel,
-          projectProgress
-        });
+          projectProgress,
+          githubUrl: req.body.githubUrl
+        };
+
+        if (req.query.progress === '1') {
+          res.setHeader('Content-Type', 'application/x-ndjson');
+          const docs = await repository.GenerateDocumentation(mode, provider, apiKey, {
+            ...baseOptions,
+            onProgress: (p) => {
+              res.write(JSON.stringify({ type: 'progress', ...p }) + '\n');
+            }
+          });
+          res.write(JSON.stringify({
+            type: 'done',
+            documentation: docs.content,
+            stats: docs.stats,
+            targetAudience
+          }) + '\n');
+          res.end();
+          return;
+        }
+
+        const docs = await repository.GenerateDocumentation(mode, provider, apiKey, baseOptions);
 
         const response = {
           step:          'generate',
@@ -330,6 +388,14 @@ class GeneratorController {
       console.error('[analyzeNature]', sanitizeLog(err.message));
       res.status(500).json({ error: err.message });
     }
+  }
+
+  // --- JOB STATUS (for async graphify-backed generation) ---
+  getJobStatus(req, res) {
+    const { jobId } = req.params;
+    const status = jobQueue.getStatus(jobId);
+    if (!status) return res.status(404).json({ error: 'Job not found or expired' });
+    res.json(status);
   }
 
   // --- KEY VALIDATION ---

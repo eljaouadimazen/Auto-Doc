@@ -33,7 +33,7 @@ You never invent components. If something is unclear, you omit it rather than gu
   }
 
   async execute(agentInput) {
-    const { diagramType, files, projectNature } = agentInput.input;
+    const { diagramType, files, projectNature, retrievalFiles } = agentInput.input;
 
     if (!files || files.length === 0) {
       throw new Error('DiagramAgent received no files to analyze');
@@ -44,9 +44,19 @@ You never invent components. If something is unclear, you omit it rather than gu
 
     // ── Build code context from actual file contents (our advantage over gitdiagram)
     // Each file is truncated to keep the total context manageable
-    const codeContext = files
+    const fileContext = files
       .map(f => `// ── FILE: ${f.path}\n${(f.content || '').slice(0, 1200)}`)
       .join('\n\n---\n\n');
+
+    // ── Include related files from knowledge graph ─
+    let retrievalContext = '';
+    if (retrievalFiles && retrievalFiles.length > 0) {
+      retrievalContext = '\n\n// ── ADDITIONAL RELATED FILES (from knowledge graph) ──\n' +
+        retrievalFiles
+          .map(f => `// ── RELATED: ${f.path}${f.relationType ? ` (${f.relationType})` : ''}`)
+          .join('\n');
+    }
+    const codeContext = fileContext + retrievalContext;
 
     // ── PASS 1: Architecture explanation ────────────────────────────────
     // gitdiagram calls this "explain" — convert raw code into structured prose
@@ -88,9 +98,13 @@ You never invent components. If something is unclear, you omit it rather than gu
 
       COMPONENT: `
 - List every UI component, screen, page, and provider with its exact name.
+- List every service, guard, interceptor, pipe, and directive with its exact name.
 - Describe what state each component manages or consumes.
 - Map the parent → child component hierarchy.
-- Identify data flow: where does data come from and how does it flow down?`,
+- Identify the data service layer: which files make HTTP calls, what backend APIs they connect to.
+- Identify the auth flow: guards, interceptors, token management, login/register components.
+- Map the full data flow: Component → Service → HTTP Client → Backend API → Database.
+- Identify state management: context providers, stores, NgRx, Redux, React context.`,
 
       PIPELINE: `
 - List every CI/CD stage, job, step, and tool with its exact name.
@@ -149,10 +163,20 @@ Use: graph TD
 - Components as nodes:  ComponentName["ComponentName\\n(description)"]
 - Parent → child:       ParentComponent --> ChildComponent
 - Data/state flow:      Store -->|state| Component
-- Use subgraphs to group related components:
-    subgraph "Feature Name"
+- Service layer:        ComponentName --> ServiceName["ServiceName\\n(HTTP calls)"]
+- Auth flow:            ComponentName --> AuthGuard["AuthGuard"] --> LoginComponent
+- Backend API:          ServiceName -->|HTTP| BackendAPI["Backend API\\n(/api/...)"]
+- Use subgraphs to group related layers:
+    subgraph "Frontend Layer"
       ComponentA
       ComponentB
+    end
+    subgraph "Service Layer"
+      DataService
+      AuthService
+    end
+    subgraph "Backend API"
+      RESTEndpoint
     end`,
 
       PIPELINE: `

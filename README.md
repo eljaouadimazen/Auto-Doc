@@ -133,7 +133,10 @@ npm start                      # serves static frontend + API on port 3000
 | POST | `/build` | Build LLM input from raw markdown |
 | POST | `/generate-docs` | Call Groq LLM and return documentation |
 | POST | `/generate` | Full pipeline in one request |
-| POST | `/validate-key` | Validate a Groq API key via /models endpoint |
+| POST | `/analyze-nature` | Classify project nature via RepoAnalyzerAgent |
+| POST | `/publish` | Publish documentation to GitHub Pages (creates/updates `gh-pages` branch) |
+| GET | `/job/:jobId` | Poll status of async doc generation job (graphify-backed) |
+| POST | `/validate-key` | Validate an API key for the chosen provider |
 | GET | `/audit` | Retrieve sanitization audit logs |
 | GET | `/rules` | List custom sanitization rules |
 | POST | `/rules` | Add a custom sanitization rule |

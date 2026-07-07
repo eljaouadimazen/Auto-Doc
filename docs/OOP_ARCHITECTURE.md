@@ -24,7 +24,7 @@
 
 ## 1. Object-Oriented Domain Models
 
-The codebase has been refactored from loose singleton services into encapsulated **domain model classes** inside `src/models/`. Each class owns its data and behavior through JavaScript private fields (`#field`).
+The codebase uses **domain model classes** inside `src/models/`. Each class owns its data and behavior through JavaScript private fields (`#field`).
 
 ### 1.1 `User` — `src/models/user.model.js`
 
@@ -33,18 +33,15 @@ Represents the authenticated operator running the system.
 | Member | Visibility | Type | Description |
 |--------|-----------|------|-------------|
 | `#id` | private | `string` | User identifier (derived from request IP) |
-| `#apiKey` | private | `string` | Groq API key provided via `x-api-key` header |
-| `#rules` | private | `SanitizationRule[]` | Loaded from built-in + custom patterns at construction |
+| `#apiKey` | private | `string` | API key provided via `x-api-key` header (for Groq, Gemini, or OpenRouter) |
 
 **Methods:**
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `SubmitRepository(url)` | `Repository` | Creates a `Repository`, fetches its files, sanitizes each `ProjectFile` using `this.#rules`, records findings to the repository's `AuditLog`, and returns the fully processed aggregate |
+| `SubmitRepository(url)` | `Repository` | Creates a `Repository`, fetches its files, and returns the fully processed aggregate |
 | `ValidateKey(llmServiceProxy)` | `Object` | Delegates API key validation to the LLM service |
 | `ViewAuditLogs(repository)` | `Object` | Returns the `AuditLog` summary of a given repository |
-| `ManageRules(action, data)` | `Object\|boolean` | Adds or removes `SanitizationRule` objects; synchronizes with the legacy `SanitizerService` for backward compatibility |
-| `_loadGlobalRules()` | `SanitizationRule[]` | Maps built-in regex patterns and user-defined custom rules into OOP `SanitizationRule` instances |
 
 ---
 
@@ -84,22 +81,20 @@ Represents a fetched GitHub repository. Acts as the **aggregate root** of the do
 
 ### 1.3 `ProjectFile` — `src/models/project-file.model.js`
 
-Represents an individual file within a repository. Encapsulates its own sanitization and AST parsing.
+Represents an individual file within a repository. AST parsing is delegated to `ASTParserService`.
 
 | Member | Visibility | Type | Description |
 |--------|-----------|------|-------------|
 | `#path` | private | `string` | File path relative to repository root |
-| `#rawContent` | private | `string` | File content (mutated in-place by `Sanitize`) |
+| `#rawContent` | private | `string` | Raw file content |
 | `#extension` | private | `string` | File extension (e.g., `.js`) |
 | `#size` | private | `number` | File size in bytes |
-| `#isSanitized` | private | `boolean` | Whether `Sanitize()` has been called |
-| `#astTree` | private | `Object\|null` | Parsed AST structure |
+| `#astTree` | private | `Object\|null` | Parsed AST structure (populated by `ExtractAST()`) |
 
 **Methods:**
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `Sanitize(rules)` | `string[]` | Iterates over `SanitizationRule[]`, applies regex matching and replacement on `#rawContent`, returns list of matched pattern names for audit logging |
 | `ExtractAST()` | `void` | Delegates to `ASTParserService` to populate `#astTree` |
 | `toJSON()` | `Object` | Serializes to a plain object for HTTP transport or LLM input |
 
@@ -117,28 +112,9 @@ Per-repository security monitoring trail. Each `Repository` instance owns its ow
 
 ---
 
-### 1.5 `SanitizationRule` — `src/models/sanitization-rule.model.js`
-
-Encapsulates a single regex-based detection pattern.
-
-| Member | Visibility | Type | Description |
-|--------|-----------|------|-------------|
-| `#id` | private | `string` | Unique identifier |
-| `#name` | private | `string` | Human-readable pattern name |
-| `#pattern` | private | `string` | Regex pattern source string |
-| `#flags` | private | `string` | Regex flags (default: `gi`) |
-| `#regex` | private | `RegExp` | Compiled `RegExp` instance |
-
-**Methods:**
-
-| Method | Returns | Description |
-|--------|---------|-------------|
-| `TestMatch(content)` | `boolean` | Tests if the regex matches the given text (resets `lastIndex` to avoid stateful bugs) |
-| `Apply(content)` | `string` | Replaces all matches with `[REDACTED_SECRET]` |
-
 ---
 
-### 1.6 `Documentation` — `src/models/documentation.model.js`
+### 1.5 `Documentation` — `src/models/documentation.model.js`
 
 Represents the final generated markdown documentation artifact.
 
@@ -152,8 +128,9 @@ Represents the final generated markdown documentation artifact.
 
 | Method | Returns | Description |
 |--------|---------|-------------|
-| `SaveToDisk(repoName)` | `string` | Writes the documentation to `public/docs/` and returns the relative URL path |
-| `PublishToPages()` | `boolean` | Placeholder for direct GitHub Pages deployment |
+| `SaveToDisk(repoName)` | `string` | Generates an HTML viewer and writes to `public/docs/` via `ViewerGeneratorService` |
+| `GeneratePdf(repoName)` | `Buffer` | Generates a PDF via `PdfGeneratorService` (Puppeteer + Mermaid rendering) |
+| `PublishToPages(targetRepo, githubToken, repoName)` | `Object` | Deploys to GitHub Pages via `PublisherService` (Octokit, creates/updates `gh-pages` branch) |
 
 ---
 
@@ -168,7 +145,7 @@ The sole controller class, exported as a singleton instance. It acts as a thin o
 - A `User` object is constructed per-request from `req.ip` and `req.headers['x-api-key']` via the `getUserContext(req)` factory function.
 - `Repository.fromDTO()` is used to reconstruct domain state across stateless HTTP boundaries for multi-step pipelines.
 - The controller differentiates between `classic` and `agentic` generation modes via the `x-mode` header.
-- The controller differentiates between `groq` and `ollama` providers via the `x-provider` header.
+- The controller differentiates between four providers (`groq`, `gemini`, `openrouter`, `ollama`) via the `x-provider` header.
 
 **Endpoint Mapping:**
 
@@ -178,12 +155,15 @@ The sole controller class, exported as a singleton instance. It acts as a thin o
 | `POST` | `/build` | `buildInput` | Builds LLM prompt messages via `LLMInputBuilder` |
 | `POST` | `/generate-docs` | `generateDocs` | Generates documentation (classic or agentic mode) |
 | `POST` | `/generate` | `generate` | Full pipeline in a single request |
-| `POST` | `/validate-key` | `validateKey` | Validates a Groq API key via `User.ValidateKey()` |
-| `GET` | `/audit` | `getAuditLogs` | Returns audit log info (per-repository in OOP mode) |
-| `GET` | `/rules` | `listRules` | Lists all sanitization rules for the current user context |
-| `POST` | `/rules` | `addRule` | Adds a custom rule via `User.ManageRules('add', ...)` |
-| `DELETE` | `/rules/:id` | `removeRule` | Removes a custom rule via `User.ManageRules('remove', ...)` |
-| `POST` | `/rules/test` | `testRule` | Tests a regex pattern against sample text using `SanitizationRule` |
+| `POST` | `/analyze-nature` | `analyzeNature` | Classifies project nature via `RepoAnalyzerAgent` |
+| `POST` | `/publish` | `publishDocs` | Publishes docs to GitHub Pages via `Documentation.PublishToPages()` |
+| `GET` | `/job/:jobId` | `getJobStatus` | Polls async job status (graphify-backed generation) |
+| `POST` | `/validate-key` | `validateKey` | Validates an API key for the chosen provider |
+| `GET` | `/audit` | `getAuditLogs` | Returns audit logs from `AuditStore` |
+| `GET` | `/rules` | `listRules` | Lists all sanitization rules (built-in + custom) |
+| `POST` | `/rules` | `addRule` | Adds a custom rule to `SanitizerService` |
+| `DELETE` | `/rules/:id` | `removeRule` | Removes a custom rule from `SanitizerService` |
+| `POST` | `/rules/test` | `testRule` | Tests a regex pattern against sample text |
 
 ---
 
@@ -381,26 +361,17 @@ Classifies the target repository by fusing structural fingerprinting with AST lo
 
 ### 3.7 `TemplateSelectorAgent` — `src/agents/template-selector.agent.js`
 
-Selects the optimal documentation template based on the project's nature and logic signals.
+An LLM-powered agent for selecting documentation templates based on project nature and logic signals. The file exists in the codebase but is **not currently used** by `EnforcedOrchestrator` — which uses a deterministic `selectTemplate()` function instead.
 
-**Available Templates:**
+**Note:** The agent is available as a future alternative for LLM-driven template selection. Currently, template+diagram selection is handled deterministically inside `orchestrator.agent.js` via a hardcoded mapping of `projectNature → { templateId, diagramType }`.
+
+**Available Templates (for reference):**
 
 | Template | Description | Use Case |
 |----------|-------------|----------|
 | `FULL_SOFTWARE` | Overview, Architecture, API, Setup, Technical Specs | Executable software projects |
 | `RESOURCE_LIST` | Overview, Categorization, Contribution Guide (NO Architecture) | Documentation/resource repositories |
 | `LIBRARY` | Overview, Installation, API Reference, Usage Examples | Reusable libraries |
-
-**Output Schema:**
-```json
-{
-  "templateId": "FULL_SOFTWARE",
-  "requiredSections": ["Overview", "Architecture", "..."],
-  "forbiddenSections": ["..."],
-  "reasoning": "Why this template was selected",
-  "diagramType": "CLASS | COMPONENT | PIPELINE | NONE"
-}
-```
 
 ---
 
@@ -662,31 +633,50 @@ The `client/` directory contains a **React + Vite** single-page application that
 | React | UI component framework |
 | Vite | Build tool and dev server |
 | JSX | Component templating |
+| shadcn/ui | Primitive UI components (button, card, input, tabs, etc.) |
+| Lucide React | Icon library |
+| marked | Markdown rendering |
+| Mermaid | Diagram rendering in doc viewer |
+| DOMPurify | HTML sanitization in doc viewer |
 
-### Component Architecture (FLAT structure)
+### Component Architecture
 
-**Important:** There is NO `components/` directory. All components are inlined as functions within `App.jsx`.
+Layout-level components (`Navbar`, `Pipeline`, `Features`, `Footer`) are inlined in `App.jsx`, while reusable/complex components live in `components/`:
 
 ```
 client/src/
-├── App.jsx              ← ALL components inlined as functions
+├── App.jsx              ← Layout components: Navbar, Pipeline, Features, Footer
 ├── main.jsx             ← React DOM entry point
 ├── index.css            ← Global styles
 ├── App.css              ← App-specific styles
+├── components/
+│   ├── DocViewer.jsx    ← Interactive documentation viewer (TOC, search, themes, Mermaid)
+│   ├── AuditPanel.jsx   ← Sanitization audit log viewer (accordion, findings summary)
+│   └── ui/              ← shadcn/ui primitives (9 files)
+│       ├── button.jsx, card.jsx, input.jsx, badge.jsx
+│       ├── tabs.jsx, select.jsx, switch.jsx
+│       ├── accordion.jsx, progress.jsx
+├── lib/
+│   └── utils.js         ← cn() classname utility
 └── assets/              ← Static assets
 ```
 
-### Components in App.jsx
+### Pipeline Component (App.jsx)
 
-| Component | Purpose |
-|-----------|---------|
-| `KeyPanel` | API key input & validation UI |
-| `PipelineSteps` | Visual pipeline progress indicator |
-| `PipelineState` | Pipeline state management |
-| `OutputPanel` | Documentation output display |
-| `AuditPanel` | Sanitization audit log viewer |
-| `RulesPanel` | Custom sanitization rules management UI |
-| `StatusBar` | Connection status & provider indicator |
+The `Pipeline` component in `App.jsx` integrates all elements of the 3-step workflow into a single UI:
+
+| Feature | Description |
+|---------|-------------|
+| Provider selection | Dropdown for Groq / Gemini / OpenRouter / Ollama |
+| Pipeline mode toggle | Agentic (multi-agent pipeline) vs Classic (chunk-based LLM calls) |
+| API key input | Password field with live validation via debounced `/validate-key` |
+| Project nature selector | User selects project type upfront (Backend, Frontend, Fullstack, etc.) |
+| Doc type | README (.md) or PDF |
+| Target audience | Tailors content depth (User, Developer, Project Manager, Product Owner) |
+| Business model / Progress | Optional context fields for PM/PO audiences |
+| Step buttons | Fetch → Build Input → Generate Docs with progress indicator |
+| Output tabs | Raw (source), Rendered (HTML), Interactive (DocViewer), Audit |
+| GitHub Pages publish | Inline publish form with target repo + token |
 
 ---
 
@@ -698,43 +688,54 @@ safe-file-generator/
 │   ├── app.js                              ← Express server entry point
 │   ├── controllers/
 │   │   └── generator.controller.js         ← MVC controller (thin orchestrator)
-│   ├── models/                             ← OOP Domain Models (6 files)
+│   ├── models/                             ← OOP Domain Models (5 files)
 │   │   ├── user.model.js                   ← User aggregate
 │   │   ├── repository.model.js             ← Repository aggregate root (Octokit built-in)
-│   │   ├── project-file.model.js           ← File entity with self-sanitization
-│   │   ├── audit-log.model.js              ← Per-repo IN-MEMORY audit trail (NO SQLite)
-│   │   ├── sanitization-rule.model.js      ← Regex rule value object
+│   │   ├── project-file.model.js           ← File entity with AST extraction
+│   │   ├── audit-log.model.js              ← Per-repo IN-MEMORY audit trail (no SQLite)
 │   │   └── documentation.model.js          ← Generated doc artifact
 │   ├── agents/                             ← Multi-Agent System (9 files)
 │   │   ├── base.agent.js                   ← Abstract base (LLM, retry, tracing, 4 providers)
 │   │   ├── protocol.js                     ← AgentInput/AgentOutput contract
-│   │   ├── orchestrator.agent.js            ← ONLY orchestrator (7-stage certified pipeline)
+│   │   ├── orchestrator.agent.js           ← EnforcedOrchestrator (pipeline coordinator)
 │   │   ├── code-intelligence.agent.js      ← LLM-powered code understanding
 │   │   ├── security.agent.js               ← Semantic secret detection
 │   │   ├── writer.agent.js                 ← Documentation generation
 │   │   ├── repo-analyzer.agent.js          ← Project classification (absorbed fingerprint)
-│   │   ├── template-selector.agent.js      ← Template selection
+│   │   ├── template-selector.agent.js      ← LLM template selection (currently unused)
 │   │   └── diagram.agent.js                ← Mermaid diagram generation (two-pass)
-│   ├── services/                           ← Infrastructure Services (9 files)
-│   │   ├── sanitizer.service.js            ← Regex patterns (34 built-in, NOT 40+)
+│   ├── services/                           ← Infrastructure Services (15 files)
+│   │   ├── sanitizer.service.js            ← Pattern registry + session factory (48 built-in patterns)
 │   │   ├── sanitizer-session.js            ← Per-request vault tokenization
 │   │   ├── sanitizer-session-store.js      ← Session persistence across HTTP requests
+│   │   ├── audit-store.service.js          ← Audit log storage by session ID
 │   │   ├── log-sanitizer.js                ← Global console.error secret stripping
 │   │   ├── ast-parser.service.js           ← Regex-based JS/TS/Python parser
 │   │   ├── llm-input-builder.service.js    ← Prompt builder (AST + raw modes, chunks)
 │   │   ├── llm.service.js                  ← 4 providers: Groq, Gemini, OpenRouter, Ollama
 │   │   ├── diagram.service.js              ← High-signal file selector for diagrams
+│   │   ├── graph.service.js                ← Knowledge graph querying (graphify output)
+│   │   ├── job-queue.service.js            ← Async job management with 1hr TTL
+│   │   ├── pdf-generator.service.js        ← Puppeteer-based PDF generation
+│   │   ├── publisher.service.js            ← GitHub Pages deployment via Octokit
+│   │   ├── viewer-generator.service.js     ← HTML documentation viewer generator
 │   │   └── rate-limiter.middleware.js      ← Sliding window rate limiter
 │   └── views/
 │       ├── index.ejs                       ← Legacy EJS template
 │       └── error.ejs                       ← Error page template
-├── client/                                 ← React Frontend (FLAT structure)
+├── client/                                 ← React + Vite Frontend
 │   ├── src/
-│   │   ├── App.jsx                         ← ALL components inlined as functions
+│   │   ├── App.jsx                         ← Navbar, Pipeline, Features, Footer
 │   │   ├── main.jsx                        ← Entry point
 │   │   ├── index.css, App.css
+│   │   ├── components/
+│   │   │   ├── DocViewer.jsx               ← Interactive doc viewer (TOC, search, Mermaid)
+│   │   │   ├── AuditPanel.jsx              ← Audit log viewer
+│   │   │   └── ui/                         ← shadcn/ui primitives (9 files)
+│   │   ├── lib/
+│   │   │   └── utils.js                    ← cn() helper
 │   │   └── assets/
-│   ├── vite.config.js                      ← outDir: 'public' (relative to client/)
+│   ├── vite.config.js                      ← outDir: '../public'
 │   └── package.json
 ├── devops/                                 ← Docker + Env config
 │   ├── .env                                ← Environment variables loaded HERE
@@ -764,26 +765,24 @@ safe-file-generator/
 - `src/services/github.service.js` — GitHub fetching is in `repository.model.js`
 - `src/services/audit-log.service.js` — Audit log is a model, not service
 - `src/services/fingerprint.service.js` — Absorbed by `repo-analyzer.agent.js`
-- ~~`src/agents/orchestrator.agent.js`~~ — Renamed from `enforced-orchestrator.agent.js`
-- `src/agents/architecture.agent.js` — Never implemented
+- `src/models/sanitization-rule.model.js` — Rules live in `sanitizer.service.js`, not a standalone model
+- `src/agents/architecture.agent.js` — Never implemented; absorbed by WriterAgent + RepoAnalyzerAgent
 
 ---
 
 ## 11. Class Diagram
 
 ```
-┌─────────────────────┐       owns        ┌──────────────────────┐
-│        User          │──────────────────▶│   SanitizationRule   │
-│─────────────────────│       0..*        │──────────────────────│
-│ - #id: string        │                   │ - #id: string        │
-│ - #apiKey: string    │                   │ - #name: string      │
-│ - #rules: Rule[]     │                   │ - #pattern: string   │
-│─────────────────────│                   │ - #flags: string     │
-│ + SubmitRepository() │                   │ - #regex: RegExp     │
-│ + ValidateKey()      │                   │──────────────────────│
-│ + ViewAuditLogs()    │                   │ + TestMatch(content) │
-│ + ManageRules()      │                   │ + Apply(content)     │
-└────────┬────────────┘                   └──────────────────────┘
+┌─────────────────────┐
+│        User          │
+│─────────────────────│
+│ - #id: string        │
+│ - #apiKey: string    │
+│─────────────────────│
+│ + SubmitRepository() │
+│ + ValidateKey()      │
+│ + ViewAuditLogs()    │
+└────────┬────────────┘
          │ creates
          ▼
 ┌─────────────────────┐       owns        ┌──────────────────────┐
@@ -792,13 +791,13 @@ safe-file-generator/
 │ - #url: string       │                   │ - #path: string      │
 │ - #owner: string     │                   │ - #rawContent: string│
 │ - #name: string      │                   │ - #extension: string │
-│ - #files: File[]     │                   │ - #isSanitized: bool │
+│ - #files: File[]     │                   │ - #size: number      │
 │ - #documentation     │                   │ - #astTree: Object   │
 │ - #auditLog          │                   │──────────────────────│
-│ - #octokit           │                   │ + Sanitize(rules)    │
-│─────────────────────│                   │ + ExtractAST()       │
-│ + FetchFiles()       │                   │ + toJSON()           │
-│ + GenerateDocumentation()│               └──────────────────────┘
+│ - #octokit           │                   │ + ExtractAST()       │
+│─────────────────────│                   │ + toJSON()           │
+│ + FetchFiles()       │                   └──────────────────────┘
+│ + GenerateDocumentation()│
 │ + static fromDTO()   │
 └────────┬────────────┘
          │ owns                            ┌──────────────────────┐
@@ -822,6 +821,7 @@ safe-file-generator/
 │ - #stats: Object     │
 │─────────────────────│
 │ + SaveToDisk()       │
+│ + GeneratePdf()      │
 │ + PublishToPages()   │
 └─────────────────────┘
 ```
@@ -861,66 +861,89 @@ GitHub URL
                          │
                          ▼
 ┌──────────────────────────────────────────────────────────────┐
-│  EnforcedOrchestrator / OrchestratorAgent                    │
+│  EnforcedOrchestrator                                        │
 ├──────────────────────────────────────────────────────────────┤
 │                                                              │
 │  Stage 1: FILE RETRIEVAL                                     │
 │  ┌──────────────────────────────────────────────────────┐    │
 │  │ Filter high-signal files (.js, .ts, .py, .json, .md) │    │
-│  │ Skip node_modules, limit budget                       │    │
+│  │ Skip node_modules, limit budget to 25 files          │    │
 │  └────────────────────────┬─────────────────────────────┘    │
 │                           ▼                                  │
-│  Stage 2: REPO ANALYSIS                                      │
+│  Stage 2: SECURITY GATE                                      │
 │  ┌──────────────────────────────────────────────────────┐    │
-│  │ RepoAnalyzerAgent                                     │    │
-│  │ ► FingerprintService (structural scoring)             │    │
-│  │ ► ASTParserService (logic signal extraction)          │    │
+│  │ Regex audit via SanitizerSession                      │    │
+│  │ Flagged files → SecurityAgent (semantic AI review)    │    │
+│  │ "do_not_send" blocked; "redact_and_send" passed       │    │
+│  └────────────────────────┬─────────────────────────────┘    │
+│                           ▼                                  │
+│  [Graphify] (if githubUrl provided)                          │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │ git clone --depth 1 → graphify CLI → graph.json      │    │
+│  │ Loaded into GraphService for relation queries        │    │
+│  └────────────────────────┬─────────────────────────────┘    │
+│                           ▼                                  │
+│  Stage 3: REPO ANALYZER                                     │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │ RepoAnalyzerAgent (or user-provided projectNature)    │    │
 │  │ ► LLM classification → projectNature, logicSignals    │    │
 │  └────────────────────────┬─────────────────────────────┘    │
 │                           ▼                                  │
-│  Stage 3: TEMPLATE SELECTION                                 │
+│  Stage 4: TEMPLATE + DIAGRAM DETERMINATION                  │
 │  ┌──────────────────────────────────────────────────────┐    │
-│  │ TemplateSelectorAgent                                 │    │
-│  │ ► Chooses: FULL_SOFTWARE | RESOURCE_LIST | LIBRARY    │    │
-│  │ ► Defines required/forbidden sections                 │    │
+│  │ selectTemplate() (deterministic, not LLM)             │    │
+│  │ ► Maps projectNature → templateId + diagramType       │    │
 │  └────────────────────────┬─────────────────────────────┘    │
 │                           ▼                                  │
-│  Stage 4: DOCUMENTATION GENERATION                           │
+│  Stage 5: DIAGRAM GENERATION (conditional)                   │
 │  ┌──────────────────────────────────────────────────────┐    │
-│  │ WriterAgent                                           │    │
-│  │ ► Generates sections in parallel (Promise.allSettled) │    │
-│  │ ► Adapts to project nature and selected template      │    │
-│  │ ► Output: Final markdown documentation                │    │
+│  │ Only if diagramType != NONE + hasExecutableCode       │    │
+│  │ DiagramAgent two-pass (explain → generate Mermaid)    │    │
+│  │ Uses graph relationships if available                  │    │
 │  └────────────────────────┬─────────────────────────────┘    │
 │                           ▼                                  │
-│  Return: { documentation, stats }                            │
+│  Stage 6: CODE INTELLIGENCE (batched)                        │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │ CodeIntelligenceAgent on up to 10 safe files          │    │
+│  │ Semantic understanding: purpose, classes, routes      │    │
+│  │ Uses graph relationships for context                   │    │
+│  └────────────────────────┬─────────────────────────────┘    │
+│                           ▼                                  │
+│  Stage 7: WRITER                                            │
+│  ┌──────────────────────────────────────────────────────┐    │
+│  │ WriterAgent generates final markdown documentation    │    │
+│  │ Sections in parallel via Promise.allSettled           │    │
+│  │ Adapts to project nature, template, and diagram       │    │
+│  └────────────────────────┬─────────────────────────────┘    │
+│                           ▼                                  │
+│  Return: { documentation, stats, projectNature, diagram }    │
 └──────────────────────────────────────────────────────────────┘
                          │
                          ▼
-              Documentation Model
-              ► .content (markdown)
-              ► .stats (metadata)
-              ► .SaveToDisk()
+               Documentation Model
+               ► .content (markdown)
+               ► .stats (metadata)
+               ► .SaveToDisk() / .GeneratePdf() / .PublishToPages()
 ```
 
-### Full OrchestratorAgent (5-Phase) — Additional Stages
+### EnforcedOrchestrator — Security Gate Internals
 
 ```
-Phase 2: SECURITY (Parallel)
+Security Gate:
     ┌───────────────────────────────────────────────┐
-    │ For each file (concurrent):                   │
-    │   1. SanitizerService.audit() → regex pass    │
-    │   2. SecurityAgent.run() → semantic AI pass   │
-    │   3. Merge findings → recommendation          │
-    │   4. Block "do_not_send" files                │
+    │ For each file (sequential):                   │
+    │   1. SanitizerSession.audit() → regex pass    │
+    │   2. If no findings → safe, skip to next      │
+    │   3. If flagged → SecurityAgent.run() → AI    │
+    │   4. Merge findings → recommendation          │
+    │   5. Do_not_send → blocked; redact → allowed  │
     └───────────────────────────────────────────────┘
 
-Phase 3: CODE INTELLIGENCE (Batched)
+Code Intelligence:
     ┌───────────────────────────────────────────────┐
-    │ For each safe file (batches of 3):            │
-    │   1. ASTParserService.parseFiles() → syntax   │
-    │   2. ASTParserService.toSummary() → compact   │
-    │   3. CodeIntelligenceAgent.run() → semantics  │
-    │   4. Wait 12s between batches (rate limit)    │
+    │ For each safe file (Promise.allSettled):      │
+    │   1. Query graph for related files (if avail) │
+    │   2. CodeIntelligenceAgent.run() → semantics  │
+    │   3. On failure → fallback to file type infer │
     └───────────────────────────────────────────────┘
 ```

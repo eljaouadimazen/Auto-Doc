@@ -15,32 +15,32 @@
   --color-overlay: rgba(45, 45, 46, 0.5);
 
   --color-surface-page: transparent;
-  --color-surface-card: rgba(30, 41, 59, 0.6);
-  --color-surface-elevated: rgba(30, 41, 59, 0.8);
-  --color-surface-hover: rgba(51, 65, 85, 0.5);
-  --color-surface-active: rgba(15, 23, 42, 0.9);
-  --color-surface-input: rgba(30, 41, 59, 0.6);
+  --color-surface-card: var(--surface-card);
+  --color-surface-elevated: var(--surface-elevated);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-active: var(--surface-active);
+  --color-surface-input: var(--surface-input);
 
-  --color-text-primary: #e2e8f0;
-  --color-text-secondary: #cbd5e1;
-  --color-text-tertiary: #94a3b8;
-  --color-text-muted: #64748b;
-  --color-text-inverse: #0f172a;
-  --color-text-link: #e2e8f0;
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-tertiary: var(--text-tertiary);
+  --color-text-muted: var(--text-muted);
+  --color-text-inverse: var(--text-inverse);
+  --color-text-link: var(--text-link);
 
-  --color-border-subtle: rgba(100, 116, 139, 0.2);
-  --color-border-default: rgba(100, 116, 139, 0.3);
-  --color-border-strong: rgba(148, 163, 184, 0.5);
+  --color-border-subtle: var(--border-subtle);
+  --color-border-default: var(--border-default);
+  --color-border-strong: var(--border-strong);
 
-  --color-status-warning-bg: rgba(254, 243, 199, 0.1);
-  --color-status-warning-text: #fbbf24;
-  --color-status-warning-border: rgba(252, 211, 77, 0.3);
-  --color-status-danger-bg: rgba(254, 226, 226, 0.1);
-  --color-status-danger-text: #f87171;
-  --color-status-danger-border: rgba(252, 165, 165, 0.3);
-  --color-status-success-bg: rgba(167, 243, 208, 0.1);
-  --color-status-success-text: #6ee7b7;
-  --color-status-success-border: rgba(110, 231, 183, 0.3);
+  --color-status-warning-bg: var(--status-warning-bg);
+  --color-status-warning-text: var(--status-warning-text);
+  --color-status-warning-border: var(--status-warning-border);
+  --color-status-danger-bg: var(--status-danger-bg);
+  --color-status-danger-text: var(--status-danger-text);
+  --color-status-danger-border: var(--status-danger-border);
+  --color-status-success-bg: var(--status-success-bg);
+  --color-status-success-text: var(--status-success-text);
+  --color-status-success-border: var(--status-success-border);
 
   --font-display: 'Inter', system-ui, sans-serif;
   --font-body: 'Inter', Helvetica, Arial, sans-serif;
@@ -55,7 +55,6 @@
   --text-3xl: 2.25rem;
   --text-4xl: 3.5rem;
 
-  /* shadcn/ui semantic colors reference CSS variables in .dark */
   --color-background: var(--background);
   --color-foreground: var(--foreground);
   --color-card: var(--card);
@@ -76,15 +75,11 @@
   --color-ring: var(--ring);
   --radius-md: 0.625rem;
 
-  /* shadcn accordion animations */
   --animate-accordion-down: accordion-down 0.2s ease-out;
   --animate-accordion-up: accordion-up 0.2s ease-out;
-
-  /* Custom animations */
   --animate-gradient-shift: gradient-shift 8s ease infinite;
   --animate-float: float 6s ease-in-out infinite;
 
-  /* Secondary accent — teal/cyan */
   --color-cyan-accent: #06b6d4;
   --color-cyan-hover: #22d3ee;
 }
@@ -110,7 +105,6 @@
 }
 
 :root {
-  /* Primitive colors */
   --cream: #fffefb;
   --off-white: #fffdf9;
   --near-black: #201515;
@@ -121,12 +115,91 @@
   --orange: #ff4f00;
   --overlay: rgba(45, 45, 46, 0.5);
 
-  /* Gradient backgrounds */
+  --accent: var(--orange);
+  --accent-hover: #ff6b2a;
+  --accent-text: #fffefb;
+
+  --font-display: 'Inter', system-ui, sans-serif;
+  --font-body: 'Inter', Helvetica, Arial, sans-serif;
+  --font-mono: ui-monospace, 'SF Mono', Consolas, monospace;
+
+  --fs-tiny: 0.6875rem;
+  --fs-small: 0.75rem;
+  --fs-body: 0.875rem;
+  --fs-md: 0.9375rem;
+  --fs-lg: 1.125rem;
+  --fs-xl: 1.25rem;
+  --fs-2xl: 1.5rem;
+  --fs-3xl: 2.25rem;
+  --fs-4xl: 3.5rem;
+
+  /* LIGHT theme defaults */
+  --gradient-page: linear-gradient(135deg, #f1f5f9 0%, #e2e8f0 50%, #f8fafc 100%);
+  --gradient-card: linear-gradient(135deg, rgba(255,255,255,0.9) 0%, rgba(248,250,252,0.8) 100%);
+  --gradient-elevated: linear-gradient(135deg, rgba(255,255,255,0.95) 0%, rgba(248,250,252,0.9) 100%);
+
+  --surface-page: transparent;
+  --surface-card: rgba(255, 255, 255, 0.7);
+  --surface-elevated: rgba(255, 255, 255, 0.9);
+  --surface-hover: rgba(241, 245, 249, 0.7);
+  --surface-active: rgba(226, 232, 240, 0.85);
+  --surface-input: rgba(248, 250, 252, 0.9);
+
+  --text-primary: #0f172a;
+  --text-secondary: #1e293b;
+  --text-tertiary: #475569;
+  --text-muted: #64748b;
+  --text-inverse: #e2e8f0;
+  --text-link: #0f172a;
+
+  --border-subtle: rgba(148, 163, 184, 0.2);
+  --border-default: rgba(148, 163, 184, 0.3);
+  --border-strong: rgba(100, 116, 139, 0.5);
+
+  --status-warning-bg: rgba(254, 243, 199, 0.7);
+  --status-warning-text: #92400e;
+  --status-warning-border: rgba(252, 211, 77, 0.7);
+  --status-danger-bg: rgba(254, 226, 226, 0.7);
+  --status-danger-text: #dc2626;
+  --status-danger-border: rgba(252, 165, 165, 0.7);
+  --status-success-bg: rgba(167, 243, 208, 0.7);
+  --status-success-text: #059669;
+  --status-success-border: rgba(110, 231, 183, 0.7);
+
+  /* LIGHT shadcn CSS variables */
+  --background: hsl(0 0% 100%);
+  --foreground: hsl(222.2 84% 4.9%);
+  --card: hsl(0 0% 100%);
+  --card-foreground: hsl(222.2 84% 4.9%);
+  --popover: hsl(0 0% 100%);
+  --popover-foreground: hsl(222.2 84% 4.9%);
+  --primary: hsl(24.9 100% 50%);
+  --primary-foreground: hsl(40 100% 97%);
+  --secondary: hsl(210 40% 96.1%);
+  --secondary-foreground: hsl(222.2 47.4% 11.2%);
+  --muted: hsl(210 40% 96.1%);
+  --muted-foreground: hsl(215.4 16.3% 46.9%);
+  --accent-foreground: hsl(222.2 47.4% 11.2%);
+  --destructive: hsl(0 84.2% 60.2%);
+  --destructive-foreground: hsl(210 40% 98%);
+  --border: hsl(214.3 31.8% 91.4%);
+  --input: hsl(214.3 31.8% 91.4%);
+  --ring: hsl(24.9 100% 50%);
+
+  font: 16px/1.25 var(--font-body);
+  color: var(--text-primary);
+  background: var(--surface-page);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+.dark {
   --gradient-page: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #0f172a 100%);
   --gradient-card: linear-gradient(135deg, rgba(30, 41, 59, 0.8) 0%, rgba(15, 23, 42, 0.6) 100%);
   --gradient-elevated: linear-gradient(135deg, rgba(30, 41, 59, 0.9) 0%, rgba(15, 23, 42, 0.8) 100%);
 
-  /* Semantic surface tokens — dark gradient hierarchy */
   --surface-page: transparent;
   --surface-card: rgba(30, 41, 59, 0.6);
   --surface-elevated: rgba(30, 41, 59, 0.8);
@@ -134,7 +207,6 @@
   --surface-active: rgba(15, 23, 42, 0.9);
   --surface-input: rgba(30, 41, 59, 0.6);
 
-  /* Semantic text tokens */
   --text-primary: #e2e8f0;
   --text-secondary: #cbd5e1;
   --text-tertiary: #94a3b8;
@@ -142,17 +214,10 @@
   --text-inverse: #0f172a;
   --text-link: #e2e8f0;
 
-  /* Semantic border tokens */
   --border-subtle: rgba(100, 116, 139, 0.2);
   --border-default: rgba(100, 116, 139, 0.3);
   --border-strong: rgba(148, 163, 184, 0.5);
 
-  /* Semantic interactive tokens */
-  --accent: var(--orange);
-  --accent-hover: #ff6b2a;
-  --accent-text: #fffefb;
-
-  /* Semantic status tokens */
   --status-warning-bg: rgba(254, 243, 199, 0.1);
   --status-warning-text: #fbbf24;
   --status-warning-border: rgba(252, 211, 77, 0.3);
@@ -163,28 +228,24 @@
   --status-success-text: #6ee7b7;
   --status-success-border: rgba(110, 231, 183, 0.3);
 
-  --font-display: 'Inter', system-ui, sans-serif;
-  --font-body: 'Inter', Helvetica, Arial, sans-serif;
-  --font-mono: ui-monospace, 'SF Mono', Consolas, monospace;
-
-  /* Type scale */
-  --fs-tiny: 0.6875rem;    /* 11px - small labels, badges */
-  --fs-small: 0.75rem;     /* 12px - secondary labels, captions */
-  --fs-body: 0.875rem;     /* 14px - body text, buttons */
-  --fs-md: 0.9375rem;      /* 15px - emphasized body */
-  --fs-lg: 1.125rem;       /* 18px - section subtitles */
-  --fs-xl: 1.25rem;        /* 20px - nav brand */
-  --fs-2xl: 1.5rem;        /* 24px - subsection titles */
-  --fs-3xl: 2.25rem;       /* 36px - section titles */
-  --fs-4xl: 3.5rem;        /* 56px - hero title */
-
-  font: 16px/1.25 var(--font-body);
-  color: var(--text-primary);
-  background: var(--surface-page);
-  font-synthesis: none;
-  text-rendering: optimizeLegibility;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
+  --background: hsl(222.2 84% 4.9%);
+  --foreground: hsl(210 40% 98%);
+  --card: hsl(222.2 84% 4.9%);
+  --card-foreground: hsl(210 40% 98%);
+  --popover: hsl(222.2 84% 4.9%);
+  --popover-foreground: hsl(210 40% 98%);
+  --primary: hsl(24.9 100% 50%);
+  --primary-foreground: hsl(40 100% 97%);
+  --secondary: hsl(217.2 32.6% 17.5%);
+  --secondary-foreground: hsl(210 40% 98%);
+  --muted: hsl(217.2 32.6% 17.5%);
+  --muted-foreground: hsl(215 20.2% 65.1%);
+  --accent-foreground: hsl(40 100% 97%);
+  --destructive: hsl(0 62.8% 30.6%);
+  --destructive-foreground: hsl(210 40% 98%);
+  --border: hsl(217.2 32.6% 17.5%);
+  --input: hsl(217.2 32.6% 17.5%);
+  --ring: hsl(24.9 100% 50%);
 }
 
 *,
@@ -199,9 +260,128 @@ body {
   min-height: 100svh;
 }
 
+.dark body,
+.dark #root {
+  background: transparent;
+}
+
 #root {
   min-height: 100svh;
   background: var(--gradient-page);
+}
+
+.rain-bg {
+  display: none;
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  width: 100%;
+  height: 100%;
+  --c: #09f;
+  background-color: #000;
+  background-image:
+    radial-gradient(4px 100px at 0px 235px, var(--c), #0000),
+    radial-gradient(4px 100px at 300px 235px, var(--c), #0000),
+    radial-gradient(1.5px 1.5px at 150px 117.5px, var(--c) 100%, #0000 150%),
+    radial-gradient(4px 100px at 0px 252px, var(--c), #0000),
+    radial-gradient(4px 100px at 300px 252px, var(--c), #0000),
+    radial-gradient(1.5px 1.5px at 150px 126px, var(--c) 100%, #0000 150%),
+    radial-gradient(4px 100px at 0px 150px, var(--c), #0000),
+    radial-gradient(4px 100px at 300px 150px, var(--c), #0000),
+    radial-gradient(1.5px 1.5px at 150px 75px, var(--c) 100%, #0000 150%),
+    radial-gradient(4px 100px at 0px 253px, var(--c), #0000),
+    radial-gradient(4px 100px at 300px 253px, var(--c), #0000),
+    radial-gradient(1.5px 1.5px at 150px 126.5px, var(--c) 100%, #0000 150%),
+    radial-gradient(4px 100px at 0px 204px, var(--c), #0000),
+    radial-gradient(4px 100px at 300px 204px, var(--c), #0000),
+    radial-gradient(1.5px 1.5px at 150px 102px, var(--c) 100%, #0000 150%),
+    radial-gradient(4px 100px at 0px 134px, var(--c), #0000),
+    radial-gradient(4px 100px at 300px 134px, var(--c), #0000),
+    radial-gradient(1.5px 1.5px at 150px 67px, var(--c) 100%, #0000 150%),
+    radial-gradient(4px 100px at 0px 179px, var(--c), #0000),
+    radial-gradient(4px 100px at 300px 179px, var(--c), #0000),
+    radial-gradient(1.5px 1.5px at 150px 89.5px, var(--c) 100%, #0000 150%),
+    radial-gradient(4px 100px at 0px 299px, var(--c), #0000),
+    radial-gradient(4px 100px at 300px 299px, var(--c), #0000),
+    radial-gradient(1.5px 1.5px at 150px 149.5px, var(--c) 100%, #0000 150%),
+    radial-gradient(4px 100px at 0px 215px, var(--c), #0000),
+    radial-gradient(4px 100px at 300px 215px, var(--c), #0000),
+    radial-gradient(1.5px 1.5px at 150px 107.5px, var(--c) 100%, #0000 150%),
+    radial-gradient(4px 100px at 0px 281px, var(--c), #0000),
+    radial-gradient(4px 100px at 300px 281px, var(--c), #0000),
+    radial-gradient(1.5px 1.5px at 150px 140.5px, var(--c) 100%, #0000 150%),
+    radial-gradient(4px 100px at 0px 158px, var(--c), #0000),
+    radial-gradient(4px 100px at 300px 158px, var(--c), #0000),
+    radial-gradient(1.5px 1.5px at 150px 79px, var(--c) 100%, #0000 150%),
+    radial-gradient(4px 100px at 0px 210px, var(--c), #0000),
+    radial-gradient(4px 100px at 300px 210px, var(--c), #0000),
+    radial-gradient(1.5px 1.5px at 150px 105px, var(--c) 100%, #0000 150%);
+  background-size:
+    300px 235px, 300px 235px, 300px 235px,
+    300px 252px, 300px 252px, 300px 252px,
+    300px 150px, 300px 150px, 300px 150px,
+    300px 253px, 300px 253px, 300px 253px,
+    300px 204px, 300px 204px, 300px 204px,
+    300px 134px, 300px 134px, 300px 134px,
+    300px 179px, 300px 179px, 300px 179px,
+    300px 299px, 300px 299px, 300px 299px,
+    300px 215px, 300px 215px, 300px 215px,
+    300px 281px, 300px 281px, 300px 281px,
+    300px 158px, 300px 158px, 300px 158px,
+    300px 210px, 300px 210px, 300px 210px;
+  animation: rain-drop 150s linear infinite;
+}
+
+.dark .rain-bg {
+  display: block;
+}
+
+.rain-bg::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+  backdrop-filter: blur(1em) brightness(6);
+  background-image: radial-gradient(
+    circle at 50% 50%,
+    #0000 0,
+    #0000 2px,
+    hsl(0 0 4%) 2px
+  );
+  background-size: 8px 8px;
+}
+
+@keyframes rain-drop {
+  0% {
+    background-position:
+      0px 220px, 3px 220px, 151.5px 337.5px,
+      25px 24px, 28px 24px, 176.5px 150px,
+      50px 16px, 53px 16px, 201.5px 91px,
+      75px 224px, 78px 224px, 226.5px 350.5px,
+      100px 19px, 103px 19px, 251.5px 121px,
+      125px 120px, 128px 120px, 276.5px 187px,
+      150px 31px, 153px 31px, 301.5px 120.5px,
+      175px 235px, 178px 235px, 326.5px 384.5px,
+      200px 121px, 203px 121px, 351.5px 228.5px,
+      225px 224px, 228px 224px, 376.5px 364.5px,
+      250px 26px, 253px 26px, 401.5px 105px,
+      275px 75px, 278px 75px, 426.5px 180px;
+  }
+  to {
+    background-position:
+      0px 6800px, 3px 6800px, 151.5px 6917.5px,
+      25px 13632px, 28px 13632px, 176.5px 13758px,
+      50px 5416px, 53px 5416px, 201.5px 5491px,
+      75px 17175px, 78px 17175px, 226.5px 17301.5px,
+      100px 5119px, 103px 5119px, 251.5px 5221px,
+      125px 8428px, 128px 8428px, 276.5px 8495px,
+      150px 9876px, 153px 9876px, 301.5px 9965.5px,
+      175px 13391px, 178px 13391px, 326.5px 13540.5px,
+      200px 14741px, 203px 14741px, 351.5px 14848.5px,
+      225px 18770px, 228px 18770px, 376.5px 18910.5px,
+      250px 5082px, 253px 5082px, 401.5px 5161px,
+      275px 6375px, 278px 6375px, 426.5px 6480px;
+  }
 }
 
 h1, h2, h3, h4 {
@@ -227,7 +407,12 @@ code {
   border: 1px solid var(--border-subtle);
   border-radius: 3px;
   padding: 2px 6px;
-  color: var(--text-secondary);
+  color: #e2e8f0;
+}
+
+.dark code {
+  background: rgba(15, 23, 42, 0.8);
+  color: #e2e8f0;
 }
 
 .container {
@@ -246,27 +431,4 @@ code {
   .container {
     padding: 0 16px;
   }
-}
-
-/* shadcn/ui CSS variables — applied via .dark class */
-/* Note: --accent inherits from :root (#ff4f00) to keep existing code happy */
-.dark {
-  --background: hsl(222.2 84% 4.9%);
-  --foreground: hsl(210 40% 98%);
-  --card: hsl(222.2 84% 4.9%);
-  --card-foreground: hsl(210 40% 98%);
-  --popover: hsl(222.2 84% 4.9%);
-  --popover-foreground: hsl(210 40% 98%);
-  --primary: hsl(24.9 100% 50%);
-  --primary-foreground: hsl(40 100% 97%);
-  --secondary: hsl(217.2 32.6% 17.5%);
-  --secondary-foreground: hsl(210 40% 98%);
-  --muted: hsl(217.2 32.6% 17.5%);
-  --muted-foreground: hsl(215 20.2% 65.1%);
-  --accent-foreground: hsl(40 100% 97%);
-  --destructive: hsl(0 62.8% 30.6%);
-  --destructive-foreground: hsl(210 40% 98%);
-  --border: hsl(217.2 32.6% 17.5%);
-  --input: hsl(217.2 32.6% 17.5%);
-  --ring: hsl(24.9 100% 50%);
 }

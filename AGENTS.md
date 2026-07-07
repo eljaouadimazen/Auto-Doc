@@ -31,7 +31,15 @@ npm ci --legacy-peer-deps
 - `GROQ_MODEL` (optional, default `llama-3.3-70b-versatile`)
 - `REPO_URL` (optional, used in CI headless mode)
 - `LANGSMITH_*` (optional) — LangChain tracing: `LANGSMITH_TRACING`, `LANGSMITH_ENDPOINT`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`
-- `PINECONE_API_KEY`, `PINECONE_INDEX` (optional) — vector DB for code-intelligence agent
+- `graphifyy` (required for graph-backed generation) — Python CLI, install via `uv tool install graphifyy`; replaced the old Pinecone vector DB
+- `GRAPHFIY_TIMEOUT` (optional, default `300000`) — ms timeout for graphify pass
+
+## Async jobs
+- **`GET /job/:jobId`** — poll for status of async doc generation (used when `githubUrl` is provided in agentic mode; graphify + LLM pipeline can take minutes)
+- Job results expire after 1 hour
+
+## Future caching
+- **`src/agents/orchestrator.agent.js`**: TODO — cache graph results by repo URL + commit SHA to avoid re-running graphify on repeated requests for the same repo version
 
 ## Docs
 - Architecture: `ARCHITECTURE.md`, `OOP_ARCHITECTURE.md`, `WORKFLOW.md`, `SECURITY.md`

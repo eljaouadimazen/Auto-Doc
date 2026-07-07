@@ -1,5 +1,8 @@
 import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import DOMPurify from 'dompurify'
+import { marked } from 'marked'
+import mermaid from 'mermaid'
+import { useDebounce } from '@/hooks/useDebounce'
 
 const THEME_KEY = 'ghp-docs-theme'
 
@@ -13,6 +16,7 @@ function slugify(text) {
 export default function DocViewer({ markdown, repoName, onClose }) {
   const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || 'light')
   const [search, setSearch] = useState('')
+  const debouncedSearch = useDebounce(search, 300)
   const [activeId, setActiveId] = useState('')
   const contentRef = useRef(null)
   const observerRef = useRef(null)
@@ -26,7 +30,6 @@ export default function DocViewer({ markdown, repoName, onClose }) {
   }, [])
 
   const headings = useMemo(() => {
-    if (typeof marked === 'undefined') return []
     const html = marked.parse(markdown || '', { breaks: true, gfm: true })
     const div = document.createElement('div')
     div.innerHTML = html
@@ -39,13 +42,12 @@ export default function DocViewer({ markdown, repoName, onClose }) {
   }, [markdown])
 
   const renderedHtml = useMemo(() => {
-    if (typeof marked === 'undefined') return `<pre>${markdown}</pre>`
     return marked.parse(markdown || '', { breaks: true, gfm: true })
   }, [markdown])
 
   const filteredSections = useMemo(() => {
-    if (!search.trim()) return null
-    const lower = search.toLowerCase()
+    if (!debouncedSearch.trim()) return null
+    const lower = debouncedSearch.toLowerCase()
     const div = document.createElement('div')
     div.innerHTML = renderedHtml
     const sections = div.querySelectorAll('h1, h2, h3')
@@ -62,11 +64,11 @@ export default function DocViewer({ markdown, repoName, onClose }) {
       }
     })
     return result
-  }, [search, renderedHtml])
+  }, [debouncedSearch, renderedHtml])
 
   const highlightHtml = useMemo(() => {
-    if (!search.trim()) return renderedHtml
-    const lower = search.toLowerCase()
+    if (!debouncedSearch.trim()) return renderedHtml
+    const lower = debouncedSearch.toLowerCase()
     const div = document.createElement('div')
     div.innerHTML = renderedHtml
     const treeWalker = document.createTreeWalker(div, NodeFilter.SHOW_TEXT, null, false)
@@ -79,17 +81,29 @@ export default function DocViewer({ markdown, repoName, onClose }) {
       const before = node.textContent.slice(0, idx)
       if (before) frag.appendChild(document.createTextNode(before))
       const mark = document.createElement('mark')
-      mark.textContent = node.textContent.slice(idx, idx + search.length)
+      mark.textContent = node.textContent.slice(idx, idx + debouncedSearch.length)
       frag.appendChild(mark)
-      const after = node.textContent.slice(idx + search.length)
+      const after = node.textContent.slice(idx + debouncedSearch.length)
       if (after) frag.appendChild(document.createTextNode(after))
       node.parentNode.replaceChild(frag, node)
     })
     return div.innerHTML
-  }, [search, renderedHtml])
+  }, [debouncedSearch, renderedHtml])
 
   useEffect(() => {
-    if (!contentRef.current || typeof mermaid === 'undefined') return
+    if (!contentRef.current) return
+
+    const codeBlocks = contentRef.current.querySelectorAll('pre code.language-mermaid')
+    codeBlocks.forEach(codeEl => {
+      const pre = codeEl.closest('pre')
+      if (!pre || pre.dataset.processed) return
+      pre.dataset.processed = 'true'
+      const div = document.createElement('div')
+      div.className = 'mermaid'
+      div.textContent = codeEl.textContent
+      pre.replaceWith(div)
+    })
+
     const mermaidDivs = Array.from(contentRef.current.querySelectorAll('.mermaid:not([data-processed])'))
     ;(async () => {
       for (const div of mermaidDivs) {
@@ -221,7 +235,11 @@ export default function DocViewer({ markdown, repoName, onClose }) {
             className="doc-viewer-content"
             style={{
               ...styles.content,
-              color: isDark ? '#e2e8f0' : '#1e293b'
+              color: isDark ? '#e2e8f0' : '#1e293b',
+              '--doc-bg-code': isDark ? '#1e293b' : '#f1f5f9',
+              '--doc-bg-th': isDark ? '#1e293b' : '#f8fafc',
+              '--doc-bg-mark': isDark ? '#854d0e' : '#fef3c7',
+              '--doc-bg-mermaid': '#1e293b',
             }}
             dangerouslySetInnerHTML={{
               __html: DOMPurify.sanitize(highlightHtml
