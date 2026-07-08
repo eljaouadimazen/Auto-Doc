@@ -14,7 +14,13 @@ function slugify(text) {
 }
 
 export default function DocViewer({ markdown, repoName, onClose }) {
-  const [theme, setTheme] = useState(() => localStorage.getItem(THEME_KEY) || 'light')
+  const [theme, setTheme] = useState(() => {
+    const stored = localStorage.getItem(THEME_KEY)
+    if (stored) return stored
+    // No saved viewer preference yet — match the app's current theme instead
+    // of defaulting to 'light', which produced a white viewer over a dark app.
+    return document.documentElement.classList.contains('dark') ? 'dark' : 'light'
+  })
   const [search, setSearch] = useState('')
   const debouncedSearch = useDebounce(search, 300)
   const [activeId, setActiveId] = useState('')
@@ -96,12 +102,14 @@ export default function DocViewer({ markdown, repoName, onClose }) {
     const codeBlocks = contentRef.current.querySelectorAll('pre code.language-mermaid')
     codeBlocks.forEach(codeEl => {
       const pre = codeEl.closest('pre')
-      if (!pre || pre.dataset.processed) return
-      pre.dataset.processed = 'true'
+      if (!pre) return
+      const container = document.createElement('div')
+      container.className = 'mermaid-container'
       const div = document.createElement('div')
       div.className = 'mermaid'
       div.textContent = codeEl.textContent
-      pre.replaceWith(div)
+      container.appendChild(div)
+      pre.replaceWith(container)
     })
 
     const mermaidDivs = Array.from(contentRef.current.querySelectorAll('.mermaid:not([data-processed])'))
@@ -241,11 +249,7 @@ export default function DocViewer({ markdown, repoName, onClose }) {
               '--doc-bg-mark': isDark ? '#854d0e' : '#fef3c7',
               '--doc-bg-mermaid': '#1e293b',
             }}
-            dangerouslySetInnerHTML={{
-              __html: DOMPurify.sanitize(highlightHtml
-                .replace(/<pre><code class="language-mermaid">/g, '<div class="mermaid-container"><div class="mermaid">')
-                .replace(/<\/code><\/pre>/g, '</div></div>'))
-            }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightHtml) }}
           />
           <div style={{
             ...styles.footer,

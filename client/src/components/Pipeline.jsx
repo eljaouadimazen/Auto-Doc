@@ -1,13 +1,17 @@
-import React, { useState, useEffect, useRef } from 'react'
+import React, { useState, useEffect } from 'react'
 import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
 import { Badge } from '@/components/ui/badge'
 import { Card, CardContent } from '@/components/ui/card'
 import HeroSection from './HeroSection'
 import SearchBar from './SearchBar'
 import NeonGlowCard from './Neonglowcards'
+import SegmentedControl from './SegmentedControl'
+import PillToggle from '@/components/ui/pill-toggle'
+import ShineButton from '@/components/ui/shine-button'
+import Input from './Input'
+import Checkbox from './Checkbox'
+import LoadingButton from './Loadingbutton'
 import { Tabs, TabsList, TabsTrigger, TabsContent } from '@/components/ui/tabs'
-import { Switch } from '@/components/ui/switch'
 import { Progress } from '@/components/ui/progress'
 import {
   Select,
@@ -17,8 +21,8 @@ import {
   SelectValue,
 } from '@/components/ui/select'
 import {
-  Server, Monitor, Layers, Smartphone, Container, Sparkles,
-  Key, FileSearch, Lock, RefreshCw, GitMerge, Cpu, Route, Compass,
+  Server, Monitor, Layers, Smartphone, Container,
+  Key, GitMerge, Cpu, Route, Compass,
   Zap, Download, FileText, Package, Rocket, Eye, GitBranch, Cog, ScrollText,
   Copy, CheckCircle2, ArrowRight, AlertCircle,
   UserCheck, Building2, TrendingUp,
@@ -39,21 +43,23 @@ import '@/App.css'
 mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' })
 
 const ALL_SECTION_OPTIONS = [
-  { id: 'overview', label: 'Overview', desc: 'Project overview and purpose' },
-  { id: 'architecture', label: 'Architecture', desc: 'Component hierarchy and layering' },
-  { id: 'api', label: 'API Reference', desc: 'Endpoints and usage' },
-  { id: 'security', label: 'Security', desc: 'Auth, validation, sanitization' },
-  { id: 'setup', label: 'Setup & Usage', desc: 'Installation and getting started' },
-  { id: 'technical', label: 'Technical Specs', desc: 'Detailed module documentation' },
-  { id: 'business_model', label: 'Business Context', desc: 'Business value and problem' },
-  { id: 'data_flow', label: 'Data Flow', desc: 'Request lifecycle and state flow' },
-  { id: 'entities', label: 'Entity Model', desc: 'Database schema and entities' },
-  { id: 'error_handling', label: 'Error Handling', desc: 'Error patterns and middleware' },
-  { id: 'configuration', label: 'Configuration', desc: 'Environment variables and config' },
-  { id: 'deployment', label: 'Deployment', desc: 'CI/CD, hosting, containers' },
-  { id: 'dependencies', label: 'Dependencies', desc: 'External packages and libraries' },
-  { id: 'progress', label: 'Progress', desc: 'Project status and milestones' },
+  { id: 'overview', label: 'Overview', desc: 'Project overview and purpose', category: 'Core' },
+  { id: 'architecture', label: 'Architecture', desc: 'Component hierarchy and layering', category: 'Core' },
+  { id: 'setup', label: 'Setup & Usage', desc: 'Installation and getting started', category: 'Core' },
+  { id: 'technical', label: 'Technical Specs', desc: 'Detailed module documentation', category: 'Core' },
+  { id: 'api', label: 'API Reference', desc: 'Endpoints and usage', category: 'Technical' },
+  { id: 'data_flow', label: 'Data Flow', desc: 'Request lifecycle and state flow', category: 'Technical' },
+  { id: 'entities', label: 'Entity Model', desc: 'Database schema and entities', category: 'Technical' },
+  { id: 'dependencies', label: 'Dependencies', desc: 'External packages and libraries', category: 'Technical' },
+  { id: 'security', label: 'Security', desc: 'Auth, validation, sanitization', category: 'Operations' },
+  { id: 'error_handling', label: 'Error Handling', desc: 'Error patterns and middleware', category: 'Operations' },
+  { id: 'configuration', label: 'Configuration', desc: 'Environment variables and config', category: 'Operations' },
+  { id: 'deployment', label: 'Deployment', desc: 'CI/CD, hosting, containers', category: 'Operations' },
+  { id: 'business_model', label: 'Business Context', desc: 'Business value and problem', category: 'Business' },
+  { id: 'progress', label: 'Progress', desc: 'Project status and milestones', category: 'Business' },
 ]
+
+const SECTION_CATEGORIES = ['Core', 'Technical', 'Operations', 'Business']
 
 const allSectionIds = ALL_SECTION_OPTIONS.map(s => s.id)
 
@@ -119,9 +125,9 @@ async function pollJob(jobId, signal, setPipelineStages) {
 }
 
 export default function Pipeline() {
-  const { states, loadingStep, error, startLoading, stopLoading, completeStep, setError, resetPipeline, invalidateSteps } = usePipelineState()
+  const { states, loadingStep, error, startLoading, stopLoading, completeStep, setError, invalidateSteps } = usePipelineState()
   const { apiKey, setApiKey, keyStatus, provider, setProvider, pipelineMode, setPipelineMode, authHeaders } = useApiKey()
-  const { output, setOutput, messages, setMessages, sessionId, setSessionId, mode, setMode, tab, setTab, wordWrap, setWordWrap, copyText, setCopyText, pdfBase64, setPdfBase64, pipelineStages, setPipelineStages, abortRef, renderedRef, resetOutput } = useOutput()
+  const { output, setOutput, messages, setMessages, sessionId, setSessionId, mode, setMode, tab, setTab, wordWrap, setWordWrap, copyText, setCopyText, pdfBase64, setPdfBase64, pipelineStages, setPipelineStages, abortRef, renderedRef } = useOutput()
   const { githubUrl, setGithubUrl, fetchedFiles, setFetchedFiles, repoName, setRepoName, rawMarkdown, setRawMarkdown, auditSummary, setAuditSummary, targetRepo, setTargetRepo, resetRepo } = useFetchRepo()
   const { githubPublishToken, setGithubPublishToken, publishStatus, setPublishStatus, publishUrl, setPublishUrl, publishError, setPublishError, resetPublish } = usePublish()
 
@@ -131,6 +137,7 @@ export default function Pipeline() {
   const [businessModel, setBusinessModel] = useState('')
   const [projectProgress, setProjectProgress] = useState('')
   const [useAST, setUseAST] = useState(true)
+  const [showApiKey, setShowApiKey] = useState(false)
 
   useEffect(() => {
     if (tab !== 'rendered' || !renderedRef.current) return
@@ -142,10 +149,13 @@ export default function Pipeline() {
         const pre = codeEl.closest('pre') || codeEl
         const diagram = codeEl.textContent || codeEl.innerText
 
+        const mermaidContainer = document.createElement('div')
+        mermaidContainer.className = 'mermaid-container'
         const mermaidDiv = document.createElement('div')
         mermaidDiv.className = 'mermaid'
         mermaidDiv.textContent = diagram
-        pre.replaceWith(mermaidDiv)
+        mermaidContainer.appendChild(mermaidDiv)
+        pre.replaceWith(mermaidContainer)
       })
 
       const mermaidDivs = renderedRef.current.querySelectorAll('.mermaid:not([data-processed])')
@@ -178,9 +188,11 @@ export default function Pipeline() {
     setPdfBase64(null)
     setMessages(null)
     setSessionId(null)
-    resetPipeline()
+    // Don't wipe the Project Nature selection here — it's laid out above the
+    // pipeline buttons, so users naturally pick it before ever clicking Fetch.
+    // Only invalidate the steps that actually need to re-run.
+    invalidateSteps(['fetch', 'build', 'generate'])
     resetRepo()
-    setProjectNature(null)
 
     try {
       const res = await fetch('/fetch', {
@@ -531,8 +543,8 @@ export default function Pipeline() {
 
           <Card className="border-border/50 bg-gradient-to-br from-card/90 to-background/80 backdrop-blur-xl shadow-2xl shadow-black/20 p-10 sm:p-14 lg:p-16">
             {/* Provider & Mode */}
-            <CardContent className="p-0 mb-8">
-              <div className="bg-muted/30 p-4 rounded-lg">
+            <CardContent className="p-0 mb-10">
+              <div className="bg-muted/30 p-5 rounded-lg">
                 <div className="flex flex-col sm:flex-row gap-4">
                   <div className="flex-1 min-w-[200px]">
                     <label className="block text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
@@ -554,30 +566,22 @@ export default function Pipeline() {
                     <label className="block text-xs font-semibold uppercase tracking-widest text-muted-foreground mb-2 flex items-center gap-1.5">
                       <Route className="w-3 h-3" /> Pipeline Mode
                     </label>
-                    <div className="flex gap-2">
-                      <Button
-                        variant={pipelineMode === 'agentic' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setPipelineMode('agentic')}
-                        className="flex-1 gap-1.5">
-                        <GitMerge className="w-3.5 h-3.5" /> Agentic
-                      </Button>
-                      <Button
-                        variant={pipelineMode === 'classic' ? 'default' : 'outline'}
-                        size="sm"
-                        onClick={() => setPipelineMode('classic')}
-                        className="flex-1 gap-1.5">
-                        <FileText className="w-3.5 h-3.5" /> Classic
-                      </Button>
-                    </div>
+                    <SegmentedControl
+                      value={pipelineMode}
+                      onChange={setPipelineMode}
+                      options={[
+                        { value: 'agentic', label: 'Agentic', icon: GitMerge },
+                        { value: 'classic', label: 'Classic', icon: FileText },
+                      ]}
+                    />
                   </div>
                 </div>
               </div>
             </CardContent>
 
             {/* API Key */}
-            <CardContent className="p-0 mb-8">
-              <div className="bg-muted/30 p-4 rounded-lg">
+            <CardContent className="p-0 mb-10">
+              <div className="bg-muted/30 p-5 rounded-lg">
                 <div className="flex items-center justify-between mb-3">
                   <div className="flex items-center gap-2">
                     <Key className="w-3.5 h-3.5 text-muted-foreground" />
@@ -593,28 +597,25 @@ export default function Pipeline() {
                     <span className="text-xs text-muted-foreground font-mono">Ensure ollama serve is running</span>
                   )}
                 </div>
-                <div className="flex gap-2">
-                  <Input
-                    id="apiKey"
-                    type="password"
-                    value={apiKey}
-                    onChange={e => setApiKey(e.target.value)}
-                    placeholder={
-                      provider === 'groq' ? 'gsk_... (pasted directly to Groq, not stored)'
-                      : provider === 'gemini' ? 'AIza... (pasted directly to Google, not stored)'
-                      : provider === 'openrouter' ? 'sk-or-... (pasted directly to OpenRouter, not stored)'
-                      : 'Not required for Ollama'
-                    }
-                    disabled={provider === 'ollama'}
-                    className="flex-1 font-mono text-xs"
-                  />
-                  <Button variant="outline" size="sm" onClick={() => {
-                    const input = document.getElementById('apiKey')
-                    if (input) input.type = input.type === 'password' ? 'text' : 'password'
-                  }}>
-                    <Eye className="w-3.5 h-3.5" />
-                  </Button>
-                </div>
+                <Input
+                  id="apiKey"
+                  type={showApiKey ? 'text' : 'password'}
+                  value={apiKey}
+                  onChange={e => setApiKey(e.target.value)}
+                  placeholder={
+                    provider === 'groq' ? 'gsk_... (pasted directly to Groq, not stored)'
+                    : provider === 'gemini' ? 'AIza... (pasted directly to Google, not stored)'
+                    : provider === 'openrouter' ? 'sk-or-... (pasted directly to OpenRouter, not stored)'
+                    : 'Not required for Ollama'
+                  }
+                  disabled={provider === 'ollama'}
+                  className="font-mono"
+                  rightSlot={
+                    <Button variant="ghost" size="sm" className="h-7 w-7 p-0" onClick={() => setShowApiKey(v => !v)}>
+                      <Eye className="w-3.5 h-3.5" />
+                    </Button>
+                  }
+                />
               </div>
             </CardContent>
 
@@ -622,9 +623,9 @@ export default function Pipeline() {
             <hr className="border-border/20 my-6" />
 
             {/* Project Nature */}
-            <CardContent className="p-0 mb-8">
-              <div className="bg-muted/20 p-4 sm:p-5 rounded-lg">
-                <div className="flex items-center gap-3 mb-3">
+            <CardContent className="p-0 mb-10">
+              <div className="bg-muted/20 p-5 sm:p-6 rounded-lg">
+                <div className="flex items-center gap-3 mb-4">
                   <div className="w-9 h-9 flex items-center justify-center bg-muted/50 border border-border/50 rounded-lg shrink-0">
                     <Compass className="w-4 h-4 text-cyan-accent" />
                   </div>
@@ -637,7 +638,7 @@ export default function Pipeline() {
                   )}
                 </div>
                 <div className="bg-background/20 rounded-lg p-3">
-                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-3">
+                  <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 gap-4">
                     {NATURE_OPTIONS.map(opt => {
                       const selected = projectNature === opt.value
                       const Icon = opt.icon
@@ -665,9 +666,9 @@ export default function Pipeline() {
             </CardContent>
 
             {/* Documentation Sections */}
-            <CardContent className="p-0 mb-8">
-              <div className="bg-muted/20 p-4 rounded-lg">
-                <div className="flex items-center gap-3 mb-3">
+            <CardContent className="p-0 mb-10">
+              <div className="bg-muted/20 p-5 rounded-lg">
+                <div className="flex items-center gap-3 mb-4">
                   <div className="w-9 h-9 flex items-center justify-center bg-muted/50 border border-border/50 rounded-lg shrink-0">
                     <FileText className="w-4 h-4 text-cyan-accent" />
                   </div>
@@ -677,12 +678,12 @@ export default function Pipeline() {
                   </div>
                   <Badge variant="outline" className="ml-auto text-xs font-mono">{selectedSections.length}/{ALL_SECTION_OPTIONS.length}</Badge>
                 </div>
-                <div className="flex flex-wrap gap-2 mb-4">
+                <div className="flex flex-wrap gap-2 mb-5">
                   {SECTION_PRESETS.map(p => (
                     <button
                       key={p.id}
                       onClick={() => setSelectedSections(p.sections)}
-                      className={`px-2.5 py-1 rounded-md border text-xs font-mono transition-all ${
+                      className={`px-3 py-1.5 rounded-md border text-xs font-mono transition-all ${
                         selectedSections.length === p.sections.length && p.sections.every(s => selectedSections.includes(s))
                           ? 'bg-accent/10 border-accent/50 text-accent'
                           : 'bg-muted/30 border-border/50 text-muted-foreground hover:bg-muted/50 hover:border-strong'
@@ -692,44 +693,45 @@ export default function Pipeline() {
                     </button>
                   ))}
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-2">
-                  {ALL_SECTION_OPTIONS.map(opt => {
-                    const checked = selectedSections.includes(opt.id)
-                    return (
-                      <NeonGlowCard
-                        key={opt.id}
-                        active={checked}
-                        className="bg-muted/30"
-                      >
-                        <label className="flex items-center gap-2 p-3 cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={checked}
-                            onChange={() => {
-                              setSelectedSections(prev =>
-                                prev.includes(opt.id)
-                                  ? prev.filter(id => id !== opt.id)
-                                  : [...prev, opt.id]
-                              )
-                            }}
-                            className="accent-accent w-4 h-4 shrink-0"
-                          />
-                          <div className="min-w-0">
-                            <div className="text-xs font-semibold text-foreground">{opt.label}</div>
-                            <div className="text-[10px] text-muted-foreground font-mono leading-tight">{opt.desc}</div>
-                          </div>
-                        </label>
-                      </NeonGlowCard>
-                    )
-                  })}
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                  {SECTION_CATEGORIES.map(cat => (
+                    <div key={cat} className="bg-background/25 border border-border/40 rounded-lg p-4">
+                      <div className="text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/70 mb-2.5">
+                        {cat}
+                      </div>
+                      <div className="space-y-1">
+                        {ALL_SECTION_OPTIONS.filter(o => o.category === cat).map(opt => {
+                          const checked = selectedSections.includes(opt.id)
+                          return (
+                            <Checkbox
+                              key={opt.id}
+                              id={`section-${opt.id}`}
+                              checked={checked}
+                              className="rounded-md px-1.5 py-1.5 hover:bg-muted/20 transition-colors"
+                              onChange={() => {
+                                setSelectedSections(prev =>
+                                  prev.includes(opt.id)
+                                    ? prev.filter(id => id !== opt.id)
+                                    : [...prev, opt.id]
+                                )
+                              }}
+                            >
+                              <div className="text-xs font-semibold text-foreground leading-tight">{opt.label}</div>
+                              <div className="text-[10px] text-muted-foreground font-mono leading-tight mt-0.5">{opt.desc}</div>
+                            </Checkbox>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  ))}
                 </div>
               </div>
             </CardContent>
 
             {/* Target Audience */}
-            <CardContent className="p-0 mb-8">
-              <div className="bg-muted/20 p-4 rounded-lg">
-                <div className="flex items-center gap-3 mb-3">
+            <CardContent className="p-0 mb-10">
+              <div className="bg-muted/20 p-5 rounded-lg">
+                <div className="flex items-center gap-3 mb-4">
                   <div className="w-9 h-9 flex items-center justify-center bg-muted/50 border border-border/50 rounded-lg shrink-0">
                     <UserCheck className="w-4 h-4 text-cyan-accent" />
                   </div>
@@ -738,7 +740,7 @@ export default function Pipeline() {
                     <div className="text-xs text-muted-foreground font-mono">Tailor content depth and focus</div>
                   </div>
                 </div>
-                <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
                   {[
                     { value: 'USER', label: 'User', desc: 'Walkthrough, no technical details' },
                     { value: 'DEVELOPER', label: 'Developer', desc: 'Full technical + business context' },
@@ -766,8 +768,8 @@ export default function Pipeline() {
 
             {/* Business Model */}
             {targetAudience !== 'USER' && (
-              <CardContent className="p-0 mb-8">
-                <div className="bg-muted/20 p-4 rounded-lg">
+              <CardContent className="p-0 mb-10">
+                <div className="bg-muted/20 p-5 rounded-lg">
                   <div className="flex items-center gap-3 mb-2">
                     <Building2 className="w-4 h-4 text-cyan-accent" />
                     <span className="text-sm font-semibold text-foreground">Business Model</span>
@@ -786,8 +788,8 @@ export default function Pipeline() {
 
             {/* Project Progress */}
             {(targetAudience === 'PROJECT_MANAGER' || targetAudience === 'PRODUCT_OWNER') && (
-              <CardContent className="p-0 mb-8">
-                <div className="bg-muted/20 p-4 rounded-lg">
+              <CardContent className="p-0 mb-10">
+                <div className="bg-muted/20 p-5 rounded-lg">
                   <div className="flex items-center gap-3 mb-2">
                     <TrendingUp className="w-4 h-4 text-cyan-accent" />
                     <span className="text-sm font-semibold text-foreground">Project Progress</span>
@@ -805,13 +807,15 @@ export default function Pipeline() {
             )}
 
             {/* AST Toggle */}
-            <CardContent className="p-0 mb-8">
+            <CardContent className="p-0 mb-10">
               <div className="bg-muted/20 rounded-lg">
                 <div className="flex items-center gap-3 p-3">
-                  <Switch
+                  <PillToggle
                     checked={useAST}
                     onCheckedChange={toggleAST}
                     id="ast-mode"
+                    icon={Zap}
+                    aria-label="Toggle AST mode"
                   />
                   <div>
                     <div className="text-sm font-medium text-foreground flex items-center gap-1.5">
@@ -828,13 +832,13 @@ export default function Pipeline() {
             </CardContent>
 
             {/* Progress */}
-            <CardContent className="p-0 mb-8">
+            <CardContent className="p-0 mb-10">
               <Progress value={progressValue()} className="h-1.5" />
             </CardContent>
 
             {/* Steps */}
-            <CardContent className="p-0 mb-8">
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 sm:gap-3">
+            <CardContent className="p-0 mb-10">
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 {STEPS.map(step => {
                   const state = getStepState(step.id)
                   const Icon = step.icon
@@ -871,29 +875,38 @@ export default function Pipeline() {
                             <div className="text-[11px] text-muted-foreground font-mono mt-px leading-tight">{step.desc}</div>
                           </div>
                         </div>
-                        <Button
-                          disabled={isDisabled}
-                          onClick={
-                            step.id === 'fetch' ? fetchRepo :
-                            step.id === 'build' ? buildInput : generateDocs
-                          }
-                          variant={
-                            state === 'active' ? 'default' :
-                            state === 'done' ? 'outline' :
-                            state === 'pending' ? 'ghost' :
-                            'secondary'
-                          }
-                          className="w-full text-sm gap-1.5">
-                          {state === 'active' ? (
-                            <>{loadingStep === 'generate' && pipelineMode === 'agentic'
-                              ? (PIPELINE_STAGES.find(s => pipelineStages[s.id]?.status === 'active')?.label || 'Working')
-                              : 'Working'}</>
-                          ) : state === 'done' ? (
-                            <><CheckCircle2 className="w-3.5 h-3.5" /> Done</>
-                          ) : (
-                            <><ArrowRight className="w-3.5 h-3.5" /> {step.label}</>
-                          )}
-                        </Button>
+                        {state === 'active' ? (
+                          <LoadingButton
+                            label={
+                              step.id === 'fetch' ? 'Cloning & sanitizing…' :
+                              step.id === 'build' ? 'Parsing & building context…' :
+                              pipelineMode === 'agentic'
+                                ? (PIPELINE_STAGES.find(s => pipelineStages[s.id]?.status === 'active')?.label || 'Generating documentation…')
+                                : 'Generating documentation…'
+                            }
+                          />
+                        ) : (
+                          <ShineButton
+                            disabled={isDisabled}
+                            onClick={
+                              step.id === 'fetch' ? fetchRepo :
+                              step.id === 'build' ? buildInput : generateDocs
+                            }
+                            tone={
+                              state === 'active' ? 'active' :
+                              state === 'done' ? 'done' :
+                              state === 'pending' ? 'pending' :
+                              'idle'
+                            }>
+                            {state === 'active' ? (
+                              'Working'
+                            ) : state === 'done' ? (
+                              <><CheckCircle2 className="w-3.5 h-3.5" /> Done</>
+                            ) : (
+                              <><ArrowRight className="w-3.5 h-3.5" /> {step.label}</>
+                            )}
+                          </ShineButton>
+                        )}
                       </div>
                     </div>
                   )
@@ -903,8 +916,8 @@ export default function Pipeline() {
 
             {/* Stage Timeline */}
             {loadingStep === 'generate' && pipelineMode === 'agentic' && (
-              <CardContent className="p-0 mb-8">
-                <div className="bg-muted/20 p-4 rounded-lg">
+              <CardContent className="p-0 mb-10">
+                <div className="bg-muted/20 p-5 rounded-lg">
                   <div className="flex items-center justify-between mb-4">
                     <div className="flex items-center gap-2">
                       <Cpu className="w-4 h-4 text-cyan-accent" />
@@ -953,7 +966,7 @@ export default function Pipeline() {
 
             {/* Error */}
             {error && (
-              <CardContent className="p-0 mb-8">
+              <CardContent className="p-0 mb-10">
                 <div className="flex items-center gap-2 bg-destructive/10 border border-destructive/30 text-foreground text-sm px-4 py-3 rounded-lg font-mono">
                   <AlertCircle className="w-4 h-4 text-destructive shrink-0" />
                   {error}
@@ -1046,7 +1059,7 @@ export default function Pipeline() {
             </CardContent>
 
             {/* State indicators */}
-            <CardContent className="p-0 mt-8">
+            <CardContent className="p-0 mt-10">
               <div className="flex justify-center gap-6 text-xs font-mono text-muted-foreground">
                 <span className={stateClass('fetch')}>● fetch</span>
                 <span className="text-border">→</span>
@@ -1058,7 +1071,7 @@ export default function Pipeline() {
 
             {/* Publish */}
             {states.generate && (
-              <CardContent className="p-0 mt-8">
+              <CardContent className="p-0 mt-10">
                 <div className="bg-muted/20 p-5 rounded-lg">
                   <div className="flex items-center gap-2 mb-4">
                     <Package className="w-4 h-4 text-cyan-accent" />
