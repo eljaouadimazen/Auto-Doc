@@ -13,9 +13,19 @@ const DiagramAgent            = require('./diagram.agent');
 const diagramService          = require('../services/diagram.service');
 const protocol                = require('./protocol');
 const GraphService            = require('../services/graph.service');
+const manifestParserService   = require('../services/manifest-parser.service');
 
 const execAsync = util.promisify(exec);
 const CODE_INTEL_LIMIT = 10;
+
+// Files graphify treats as "doc/paper/image" — requires an LLM key for
+// semantic extraction and hard-fails without one. Auto-Doc's own pipeline
+// never uses these either, so they're pruned before graphify ever sees them.
+const NON_CODE_EXTENSIONS = new Set([
+  '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.odt', '.odp', '.ods',
+  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico', '.tiff',
+  '.mp4', '.mov', '.avi', '.mp3', '.wav',
+]);
 
 const GRAPHIFY_BIN = (() => {
   const envBin = process.env.GRAPHFIY_BIN;
@@ -76,6 +86,9 @@ class EnforcedOrchestrator extends BaseAgent {
     // ── Stage 2: Security gate ─────────────────────────────────────────
     const safeFiles = await this.runSecurityGate(contextFiles, agentInput.context, apiKey);
     this.onProgress({ stage: 2, message: `${safeFiles.length} files cleared security gate` });
+
+    // ── Manifest parsing (deterministic, no LLM) ────────────────────────
+    const manifestDependencies = manifestParserService.extract(safeFiles);
 
     // ── Graphify: Clone repo and build knowledge graph ─────────────────
     let graphService = null;
@@ -200,6 +213,7 @@ class EnforcedOrchestrator extends BaseAgent {
         businessModel,
         projectProgress,
         godNodes,
+        manifestDependencies,
         fileAnalyses: fileAnalyses.length > 0
           ? fileAnalyses
           : safeFiles.map(f => ({
@@ -234,6 +248,12 @@ class EnforcedOrchestrator extends BaseAgent {
       this.onProgress({ stage: 'graphify', message: 'Cloning repository for graph analysis...' });
       await execAsync(`git clone --depth 1 ${githubUrl} ${tmpDir}/repo`, { timeout: 120000 });
 
+      // Graphify treats PDFs/office docs/images as needing LLM-based semantic
+      // extraction and hard-fails without a compatible API key. None of these
+      // feed Auto-Doc's own documentation anyway — drop them so a code-only
+      // corpus reaches graphify, which needs no key at all.
+      this.pruneNonCodeFiles(`${tmpDir}/repo`);
+
       this.onProgress({ stage: 'graphify', message: 'Running graphify to build knowledge graph...' });
       const graphifyTimeout = parseInt(process.env.GRAPHFIY_TIMEOUT, 10) || 300000;
       await execAsync(`${GRAPHIFY_BIN} .`, { cwd: `${tmpDir}/repo`, timeout: graphifyTimeout });
@@ -257,6 +277,33 @@ class EnforcedOrchestrator extends BaseAgent {
       return null;
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
+  }
+
+  /**
+   * Recursively delete PDFs/office docs/images from a cloned repo before
+   * handing it to graphify, so its scan finds a code-only corpus and never
+   * requires an LLM key for semantic extraction.
+   */
+  pruneNonCodeFiles(dir) {
+    let entries;
+    try {
+      entries = fs.readdirSync(dir, { withFileTypes: true });
+    } catch {
+      return;
+    }
+
+    for (const entry of entries) {
+      if (entry.name === '.git') continue;
+      const fullPath = path.join(dir, entry.name);
+
+      if (entry.isDirectory()) {
+        this.pruneNonCodeFiles(fullPath);
+      } else if (NON_CODE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
+        try { fs.unlinkSync(fullPath); } catch (e) {
+          console.warn(`[Orchestrator] Failed to prune ${fullPath}: ${e.message}`);
+        }
+      }
     }
   }
 
@@ -336,7 +383,7 @@ class EnforcedOrchestrator extends BaseAgent {
   }
 
   filterHighSignalFiles(files) {
-    const CRITICAL_EXT = ['.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.go', '.kt', '.dart', '.swift', '.rb', '.php', '.rs', '.vue', '.svelte', '.tf', '.gradle', '.properties', '.yml', '.yaml', '.env'];
+    const CRITICAL_EXT = ['.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.go', '.kt', '.dart', '.swift', '.rb', '.php', '.rs', '.vue', '.svelte', '.tf', '.gradle', '.properties', '.yml', '.yaml', '.env', '.xml', '.mod', '.toml', '.txt'];
     const SKIP         = /node_modules|\/dist\/|\/build\/|\.git\//;
 
     return files
@@ -399,10 +446,12 @@ class EnforcedOrchestrator extends BaseAgent {
   }
 
   fileScore(p) {
+    if (/(^|\/)(pom\.xml|build\.gradle(\.kts)?|package\.json|requirements\.txt|go\.mod|Cargo\.toml|pyproject\.toml)$/i.test(p)) return 0;
     if (/app\.(js|ts|java|py|dart|kt)$/i.test(p)) return 0;
     if (/main\.(js|ts|java|py|dart|kt)$/i.test(p)) return 0;
     if (/controller/i.test(p)) return 2;
     if (/service/i.test(p)) return 3;
+    if (/repository|dao/i.test(p)) return 2;
     if (/component|screen|page/i.test(p)) return 2;
     if (/main\.dart|AppDelegate|MainActivity/i.test(p)) return 0;
     if (/main\.tf|provider\.tf|variables\.tf/i.test(p)) return 1;

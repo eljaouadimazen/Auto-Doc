@@ -98,7 +98,7 @@ class DiagramService {
         /Widget\s*{|StatefulWidget|StatelessWidget/ // Flutter
       ],
       PIPELINE: [
-        /^(on:|jobs:|steps:|stages:)/m,  // YAML pipeline keys
+        /^\s*(on|jobs|steps|stages):/m,  // YAML pipeline keys (steps/stages are usually indented)
         /docker\s+build|docker\s+push/,
         /npm\s+(run|install|test|build)/,
         /runs-on:|uses:/               // GitHub Actions

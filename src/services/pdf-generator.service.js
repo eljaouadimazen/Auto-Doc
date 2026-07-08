@@ -1,8 +1,12 @@
-const puppeteer = require('puppeteer');
 const ViewerGeneratorService = require('./viewer-generator.service');
 
 class PdfGeneratorService {
   static async generatePdf(markdown, repoName, stats = {}) {
+    // Lazy-required: puppeteer's ESM build breaks Jest's CommonJS transform
+    // when required eagerly at module load — every file that (transitively)
+    // requires this module would fail to import under Jest otherwise, even
+    // though PDF generation is never exercised in those tests.
+    const puppeteer = require('puppeteer');
     const html = ViewerGeneratorService.generateViewerHtml(markdown, repoName, stats);
 
     const browser = await puppeteer.launch({
@@ -14,6 +18,10 @@ class PdfGeneratorService {
       const page = await browser.newPage();
       await page.setContent(html, { waitUntil: 'networkidle0', timeout: 30000 });
 
+      // This callback runs inside the headless browser page (Puppeteer
+      // injects it via page.evaluate), not in this Node process — `document`
+      // and `mermaid` are real browser globals there, not undefined.
+      /* eslint-disable no-undef */
       await page.evaluate(() => {
         return new Promise(resolve => {
           if (typeof mermaid === 'undefined') { resolve(); return; }
@@ -24,6 +32,7 @@ class PdfGeneratorService {
           setTimeout(() => { clearInterval(check); resolve(); }, 8000);
         });
       });
+      /* eslint-enable no-undef */
 
       const pdf = await page.pdf({
         format: 'A4',

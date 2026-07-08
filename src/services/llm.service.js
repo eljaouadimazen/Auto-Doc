@@ -201,18 +201,15 @@ class LLMService {
 
     // Gemini — validate via REST API using models list endpoint
     if (provider === 'gemini') {
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 10000);
       try {
         const url = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
-
-        // Add timeout to fetch
-        const controller = new AbortController();
-        const timeout = setTimeout(() => controller.abort(), 10000);
 
         const response = await fetch(url, {
           method: 'GET',
           signal: controller.signal
         });
-        clearTimeout(timeout);
 
         const data = await response.json();
 
@@ -237,6 +234,8 @@ class LLMService {
           return { valid: false, reason: 'Request timed out — check your connection' };
         }
         return { valid: false, reason: `Gemini error: ${error.message}` };
+      } finally {
+        clearTimeout(timeout);
       }
     }
 

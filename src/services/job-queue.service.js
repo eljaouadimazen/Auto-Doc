@@ -6,6 +6,7 @@ class JobQueue {
   constructor() {
     this._jobs = new Map();
     this._cleanupInterval = setInterval(() => this._expireStale(), TTL_MS);
+    this._cleanupInterval.unref(); // Don't keep the process (or test workers) alive
   }
 
   create(runFn) {

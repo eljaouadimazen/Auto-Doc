@@ -17,7 +17,8 @@ class RateLimiter {
     this.store = new Map();
 
     // Clean up stale entries every 10 minutes
-    setInterval(() => this.cleanup(), 10 * 60 * 1000);
+    const cleanupInterval = setInterval(() => this.cleanup(), 10 * 60 * 1000);
+    cleanupInterval.unref(); // Don't keep the process (or test workers) alive
   }
 
   /**

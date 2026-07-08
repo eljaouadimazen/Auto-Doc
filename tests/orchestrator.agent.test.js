@@ -1,4 +1,7 @@
 const EnforcedOrchestrator = require('../src/agents/orchestrator.agent');
+const fs = require('fs');
+const os = require('os');
+const path = require('path');
 
 describe('EnforcedOrchestrator', () => {
   let orchestrator;
@@ -121,6 +124,20 @@ describe('EnforcedOrchestrator', () => {
       expect(orchestrator.fileScore('src/middleware/auth.middleware.ts')).toBe(7);
       expect(orchestrator.fileScore('src/config/database.js')).toBe(7);
     });
+
+    test('returns 0 for manifest files regardless of directory depth', () => {
+      expect(orchestrator.fileScore('pom.xml')).toBe(0);
+      expect(orchestrator.fileScore('build.gradle')).toBe(0);
+      expect(orchestrator.fileScore('package.json')).toBe(0);
+      expect(orchestrator.fileScore('requirements.txt')).toBe(0);
+      expect(orchestrator.fileScore('go.mod')).toBe(0);
+      expect(orchestrator.fileScore('Cargo.toml')).toBe(0);
+    });
+
+    test('returns 2 for repository/DAO files, same tier as controllers', () => {
+      expect(orchestrator.fileScore('src/repositories/UserRepository.java')).toBe(2);
+      expect(orchestrator.fileScore('src/dao/UserDao.java')).toBe(2);
+    });
   });
 
   describe('inferFileType', () => {
@@ -164,10 +181,9 @@ describe('EnforcedOrchestrator', () => {
         result: { projectNature: 'BACKEND', logicSignals: ['express'], hasExecutableCode: true }
       });
 
-      orch.templateSelector.run = jest.fn().mockResolvedValue({
-        status: 'success',
-        result: { templateId: 'FULL_SOFTWARE', diagramType: 'CLASS' }
-      });
+      // Note: template selection is a deterministic selectTemplate() function,
+      // not an agent — there's no templateSelector instance to mock. BACKEND
+      // maps to { templateId: 'FULL_SOFTWARE', diagramType: 'CLASS' }.
 
       orch.diagramAgent.run = jest.fn().mockResolvedValue({
         status: 'success',
@@ -218,19 +234,6 @@ describe('EnforcedOrchestrator', () => {
       })).rejects.toThrow('RepoAnalyzer failed');
     });
 
-    test('throws when TemplateSelector fails', async () => {
-      const orch = makeMockOrchestrator();
-      orch.templateSelector.run = jest.fn().mockResolvedValue({
-        status: 'failed',
-        error: 'Selection failed'
-      });
-
-      await expect(orch.execute({
-        input: { files: validFiles, provider: 'groq' },
-        context: { repository: 'test-repo', apiKey: 'key' }
-      })).rejects.toThrow('TemplateSelector failed');
-    });
-
     test('throws when WriterAgent fails', async () => {
       const orch = makeMockOrchestrator();
       orch.writer.run = jest.fn().mockResolvedValue({
@@ -250,10 +253,8 @@ describe('EnforcedOrchestrator', () => {
         status: 'success',
         result: { projectNature: 'RESOURCE_LIST', logicSignals: [], hasExecutableCode: false }
       });
-      orch.templateSelector.run = jest.fn().mockResolvedValue({
-        status: 'success',
-        result: { templateId: 'RESOURCE_LIST', diagramType: 'NONE' }
-      });
+      // selectTemplate('RESOURCE_LIST') deterministically resolves to
+      // { templateId: 'RESOURCE_LIST', diagramType: 'NONE' } — no mock needed.
 
       const result = await orch.execute({
         input: { files: validFiles, provider: 'groq' },
@@ -275,8 +276,13 @@ describe('EnforcedOrchestrator', () => {
         context: { repository: 'test-repo', apiKey: 'key' }
       });
 
-      expect(onProgress).toHaveBeenCalledTimes(7);
+      // Not asserting an exact call count — runCodeIntelligence emits one
+      // progress event per file on top of the per-stage events, so the total
+      // scales with the file count rather than being a fixed number of stages.
       expect(onProgress).toHaveBeenCalledWith({ stage: 1, message: expect.any(String) });
+      expect(onProgress).toHaveBeenCalledWith({ stage: 2, message: expect.any(String) });
+      expect(onProgress).toHaveBeenCalledWith({ stage: 3, message: expect.any(String) });
+      expect(onProgress).toHaveBeenCalledWith({ stage: 4, message: expect.any(String) });
       expect(onProgress).toHaveBeenCalledWith({ stage: 6, message: 'Documentation generated' });
     });
   });
@@ -382,6 +388,56 @@ describe('EnforcedOrchestrator', () => {
       expect(result[0].path).toBe('src/app.js');
       expect(result[0].type).toBe('source');
       expect(result[0].snippet).toBeDefined();
+    });
+  });
+
+  describe('pruneNonCodeFiles', () => {
+    let tmpDir;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'prune-test-'));
+    });
+
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    test('deletes PDFs and images but keeps code files', () => {
+      fs.writeFileSync(path.join(tmpDir, 'Foo.java'), 'class Foo {}');
+      fs.writeFileSync(path.join(tmpDir, 'rapport.pdf'), 'fake pdf');
+      fs.writeFileSync(path.join(tmpDir, 'diagram.png'), 'fake image');
+
+      orchestrator.pruneNonCodeFiles(tmpDir);
+
+      expect(fs.existsSync(path.join(tmpDir, 'Foo.java'))).toBe(true);
+      expect(fs.existsSync(path.join(tmpDir, 'rapport.pdf'))).toBe(false);
+      expect(fs.existsSync(path.join(tmpDir, 'diagram.png'))).toBe(false);
+    });
+
+    test('recurses into subdirectories', () => {
+      const nested = path.join(tmpDir, 'src', 'main', 'resources');
+      fs.mkdirSync(nested, { recursive: true });
+      fs.writeFileSync(path.join(nested, 'logo.svg'), 'fake svg');
+      fs.writeFileSync(path.join(nested, 'App.java'), 'class App {}');
+
+      orchestrator.pruneNonCodeFiles(tmpDir);
+
+      expect(fs.existsSync(path.join(nested, 'logo.svg'))).toBe(false);
+      expect(fs.existsSync(path.join(nested, 'App.java'))).toBe(true);
+    });
+
+    test('does not descend into .git', () => {
+      const gitDir = path.join(tmpDir, '.git');
+      fs.mkdirSync(gitDir, { recursive: true });
+      fs.writeFileSync(path.join(gitDir, 'should-not-touch.pdf'), 'fake pdf');
+
+      orchestrator.pruneNonCodeFiles(tmpDir);
+
+      expect(fs.existsSync(path.join(gitDir, 'should-not-touch.pdf'))).toBe(true);
+    });
+
+    test('does not throw for a non-existent directory', () => {
+      expect(() => orchestrator.pruneNonCodeFiles(path.join(tmpDir, 'missing'))).not.toThrow();
     });
   });
 });
