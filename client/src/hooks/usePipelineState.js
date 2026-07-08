@@ -20,10 +20,11 @@ function reducer(state, action) {
       return { ...state, error: action.error, loadingStep: null }
     case 'RESET':
       return { ...initialState, states: { ...INITIAL_STATES } }
-    case 'INVALIDATE_AFTER':
+    case 'INVALIDATE_AFTER': {
       const next = { ...state.states }
       action.steps.forEach(s => { next[s] = false })
       return { ...state, states: next }
+    }
     default:
       return state
   }

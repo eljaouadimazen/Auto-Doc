@@ -148,14 +148,16 @@
   background: var(--doc-bg-mark, #fef3c7);
   padding: 1px 2px; border-radius: 2px;
 }
-.doc-viewer-content .mermaid-container {
+.doc-viewer-content .mermaid-container,
+.rendered-output .mermaid-container {
   background: var(--doc-bg-mermaid, #1e293b);
   border: 1px solid var(--border, hsl(217.2 32.6% 17.5%));
   border-radius: 8px;
   padding: 24px; margin: 16px 0;
   text-align: center; overflow-x: auto;
 }
-.doc-viewer-content .mermaid-container svg { max-width: 100%; height: auto; }
+.doc-viewer-content .mermaid-container svg,
+.rendered-output .mermaid-container svg { max-width: 100%; height: auto; }
 
 /* ===== Animations ===== */
 @keyframes output-fade-in {

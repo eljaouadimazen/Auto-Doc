@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 
 let styleInjected = false;
 
@@ -47,13 +47,32 @@ const STYLES = `
   border-radius: 13px;
   height: 100%;
   transition: box-shadow 0.25s ease;
+  overflow: hidden;
 }
 .glow-card-wrap.active .glow-card {
   box-shadow: 0 0 24px -4px rgba(255, 122, 61, 0.25), inset 0 0 20px -10px rgba(255, 122, 61, 0.15);
 }
+.glow-card::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  opacity: 0;
+  background: radial-gradient(220px circle at var(--spot-x, 50%) var(--spot-y, 50%), rgba(255, 138, 61, 0.16), transparent 70%);
+  transition: opacity 0.3s ease;
+}
+.glow-card:hover::after {
+  opacity: 1;
+}
+.glow-card > * {
+  position: relative;
+  z-index: 1;
+}
 `;
 
-export default function NeonGlowCard({ children, active = false, className = '', onClick }) {
+export default function NeonGlowCard({ children, active = false, className = '', onClick, spotlight = true }) {
+  const cardRef = useRef(null);
+
   useEffect(() => {
     if (!styleInjected) {
       styleInjected = true;
@@ -63,12 +82,19 @@ export default function NeonGlowCard({ children, active = false, className = '',
     }
   }, []);
 
+  const handleMouseMove = (e) => {
+    if (!spotlight || !cardRef.current) return;
+    const rect = cardRef.current.getBoundingClientRect();
+    cardRef.current.style.setProperty('--spot-x', `${e.clientX - rect.left}px`);
+    cardRef.current.style.setProperty('--spot-y', `${e.clientY - rect.top}px`);
+  };
+
   return (
     <div
       className={`glow-card-wrap ${active ? 'active' : ''} ${onClick ? 'cursor-pointer' : ''}`}
       onClick={onClick}
     >
-      <div className={`glow-card ${className}`}>
+      <div ref={cardRef} className={`glow-card ${className}`} onMouseMove={handleMouseMove}>
         {children}
       </div>
     </div>
