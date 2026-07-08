@@ -62,7 +62,7 @@ describe('DiagramAgent', () => {
     });
 
     test('executes two-pass pipeline and returns clean mermaid', async () => {
-      jest.spyOn(agent, '_explainArchitecture').mockResolvedValue('Architecture explanation');
+      jest.spyOn(agent, '_explainArchitecture').mockResolvedValue('ClassA calls ClassB.doWork() to process the request.');
       jest.spyOn(agent, '_generateMermaid').mockResolvedValue('```mermaid\nclassDiagram\nClassA --> ClassB\n```');
 
       const result = await agent.execute({
@@ -149,6 +149,121 @@ describe('DiagramAgent', () => {
     });
   });
 
+  describe('_sanitizeMermaid', () => {
+    test('auto-repairs a generic aggregate class instead of leaving the diagram broken', () => {
+      const raw = [
+        'classDiagram',
+        'class Services {',
+        '}',
+        'class ChatService {',
+        '  +getAllChats()',
+        '}',
+        'class ChatRepository {',
+        '}',
+        'Services ..> ChatRepository : "uses"',
+        'ChatService --> ChatRepository',
+      ].join('\n');
+
+      const result = agent._sanitizeMermaid(raw, 'CLASS');
+
+      expect(result).not.toMatch(/class\s+Services\s*\{/);
+      expect(result).not.toContain('Services ..> ChatRepository');
+      expect(result).toContain('class ChatService');
+      expect(result).toContain('class ChatRepository');
+      expect(result).toContain('ChatService --> ChatRepository');
+
+      // Sanitized output should pass validation now that the generic class is gone.
+      expect(() => agent._validate(result, 'CLASS')).not.toThrow();
+    });
+
+    test('leaves a diagram with only real class names untouched', () => {
+      const raw = 'classDiagram\nclass AuthController {\n}\nclass UserService {\n}\nAuthController --> UserService';
+      const result = agent._sanitizeMermaid(raw, 'CLASS');
+      expect(result).toContain('class AuthController');
+      expect(result).toContain('class UserService');
+      expect(result).toContain('AuthController --> UserService');
+    });
+
+    test('does not run the generic-class strip for non-CLASS diagrams', () => {
+      const raw = 'graph TD\nServices["Services"] --> Database';
+      const result = agent._sanitizeMermaid(raw, 'COMPONENT');
+      expect(result).toContain('Services["Services"]');
+    });
+
+    test('skips the groundedness check when no explanation or file tree is provided', () => {
+      const raw = 'classDiagram\nclass Nonexistent {\n}\nNonexistent --> AlsoFake';
+      const result = agent._sanitizeMermaid(raw, 'CLASS');
+      expect(result).toContain('class Nonexistent');
+    });
+
+    test('strips a COMPONENT node copied verbatim from the syntax guide with no basis in the explanation', () => {
+      const explanation = 'LoginPage renders a form and calls AuthApi.login() to authenticate the user.';
+      const fileTree = 'src/components/LoginPage.jsx\nsrc/services/AuthApi.js';
+      const raw = [
+        'graph TD',
+        'LoginPage["LoginPage"] --> AuthApi["AuthApi"]',
+        'AuthApi --> AuthGuard["AuthGuard"]',
+        'AuthGuard --> BackendAPI["Backend API"]',
+      ].join('\n');
+
+      const result = agent._sanitizeMermaid(raw, 'COMPONENT', explanation, fileTree);
+
+      expect(result).toContain('LoginPage["LoginPage"] --> AuthApi["AuthApi"]');
+      expect(result).not.toContain('AuthGuard');
+      expect(result).not.toContain('BackendAPI');
+    });
+
+    test('strips a PIPELINE stage copied verbatim from the syntax guide with no basis in the explanation', () => {
+      const explanation = 'The lint job runs eslint, then the test job runs jest.';
+      const fileTree = '.github/workflows/ci.yml';
+      const raw = [
+        'flowchart LR',
+        'lint["lint"] --> test["test"]',
+        'subgraph "Production"',
+        'Deploy["Deploy"] --> HealthCheck["HealthCheck"]',
+        'end',
+      ].join('\n');
+
+      const result = agent._sanitizeMermaid(raw, 'PIPELINE', explanation, fileTree);
+
+      expect(result).toContain('lint["lint"] --> test["test"]');
+      expect(result).not.toContain('Deploy["Deploy"]');
+      expect(result).not.toContain('HealthCheck["HealthCheck"]');
+    });
+
+    test('keeps a real class name found only in the file tree, not the explanation prose', () => {
+      const explanation = 'The controller handles incoming requests and delegates to the service layer.';
+      const fileTree = 'src/main/java/com/example/AuthController.java';
+      const raw = 'classDiagram\nclass AuthController {\n}\nclass UserService {\n}\nAuthController --> UserService';
+
+      const result = agent._sanitizeMermaid(raw, 'CLASS', explanation, fileTree);
+
+      expect(result).toContain('class AuthController');
+    });
+  });
+
+  describe('_extractNodeNames', () => {
+    test('extracts class declarations and relationship endpoints for CLASS diagrams', () => {
+      const mermaid = 'classDiagram\nclass Foo {\n}\nFoo --> Bar\nBar ..> Baz';
+      const names = agent._extractNodeNames(mermaid, 'CLASS');
+      expect(names).toEqual(new Set(['Foo', 'Bar', 'Baz']));
+    });
+
+    test('extracts labeled nodes and edges for COMPONENT/PIPELINE diagrams, excluding subgraph titles', () => {
+      const mermaid = 'graph TD\nsubgraph "Frontend Layer"\nCompA["CompA"] --> CompB["CompB"]\nend';
+      const names = agent._extractNodeNames(mermaid, 'COMPONENT');
+      expect(names).toEqual(new Set(['CompA', 'CompB']));
+      expect(names.has('Frontend')).toBe(false);
+    });
+
+    test('excludes mermaid keywords from extracted names', () => {
+      const mermaid = 'flowchart LR\nA --> B';
+      const names = agent._extractNodeNames(mermaid, 'PIPELINE');
+      expect(names.has('flowchart')).toBe(false);
+      expect(names.has('LR')).toBe(false);
+    });
+  });
+
   describe('_validate', () => {
     test('passes valid classDiagram for CLASS type', () => {
       expect(() => agent._validate('classDiagram\nClassA --> ClassB', 'CLASS')).not.toThrow();
@@ -182,6 +297,27 @@ describe('DiagramAgent', () => {
     test('throws when COMPONENT keyword is missing for COMPONENT type', () => {
       const diagram = 'classDiagram\nClassA --> ClassB\nClassC --> ClassD';
       expect(() => agent._validate(diagram, 'COMPONENT')).toThrow('expected keyword for COMPONENT');
+    });
+
+    test('throws when a generic aggregate class like "Services" is invented', () => {
+      const diagram = 'classDiagram\nclass Services {\n}\nclass ChatService {\n}\nServices ..> ChatRepository';
+      expect(() => agent._validate(diagram, 'CLASS')).toThrow('generic aggregate class "Services"');
+    });
+
+    test('throws for other generic layer names (Controllers, Repositories, Utils)', () => {
+      expect(() => agent._validate('classDiagram\nclass Controllers {\n}', 'CLASS')).toThrow('generic aggregate class "Controllers"');
+      expect(() => agent._validate('classDiagram\nclass Repositories {\n}', 'CLASS')).toThrow('generic aggregate class "Repositories"');
+      expect(() => agent._validate('classDiagram\nclass Utils {\n}', 'CLASS')).toThrow('generic aggregate class "Utils"');
+    });
+
+    test('does not flag real class names that merely resemble layer names', () => {
+      const diagram = 'classDiagram\nclass ChatService {\n}\nclass UserRepository {\n}\nclass AuthController {\n}';
+      expect(() => agent._validate(diagram, 'CLASS')).not.toThrow();
+    });
+
+    test('does not apply the generic-name check to non-CLASS diagram types', () => {
+      const diagram = 'graph TD\nServices["Services"] --> Database';
+      expect(() => agent._validate(diagram, 'COMPONENT')).not.toThrow();
     });
   });
 });

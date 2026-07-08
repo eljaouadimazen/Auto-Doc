@@ -88,7 +88,7 @@ describe('WriterAgent', () => {
 
   describe('writeFooter', () => {
     test('includes repository name and agent pipeline reference', () => {
-      const footer = agent.writeFooter('my-awesome-repo');
+      const footer = agent.writeFooter('my-awesome-repo', 'DEVELOPER');
       expect(footer).toContain('my-awesome-repo');
       expect(footer).toContain('Multi-Agent Pipeline');
     });
@@ -99,13 +99,22 @@ describe('WriterAgent', () => {
       jest.restoreAllMocks();
     });
 
-    test('returns documentation with 6 sections for FULL_SOFTWARE strategy', async () => {
+    test('returns documentation for FULL_SOFTWARE strategy with all DEVELOPER sections', async () => {
+      // DEVELOPER audience produces 13 sections (see getSections()) + the
+      // footer = 14 parts. entities/error_handling/configuration/deployment/
+      // dependencies are left unmocked deliberately — with no matching
+      // evidence in fileAnalyses they deterministically return a hardcoded
+      // "not detected" string without calling callLLM, so they don't need
+      // mocking here. business_model and data_flow have no such fallback —
+      // they always call callLLM — so those two must be mocked.
       jest.spyOn(agent, 'writeOverview').mockResolvedValue('# Overview');
       jest.spyOn(agent, 'writeArchitecture').mockResolvedValue('# Architecture');
       jest.spyOn(agent, 'writeAPIReference').mockResolvedValue('# API Reference');
       jest.spyOn(agent, 'writeSecuritySection').mockResolvedValue('# Security');
       jest.spyOn(agent, 'writeSetupUsage').mockResolvedValue('# Setup & Usage');
       jest.spyOn(agent, 'writeTechnicalModules').mockResolvedValue('# Technical Specifications');
+      jest.spyOn(agent, 'writeBusinessModel').mockResolvedValue('# Business Context');
+      jest.spyOn(agent, 'writeDataFlow').mockResolvedValue('# Data Flow');
 
       const result = await agent.execute({
         input: {
@@ -123,8 +132,10 @@ describe('WriterAgent', () => {
       expect(result.documentation).toContain('# Security');
       expect(result.documentation).toContain('# Setup & Usage');
       expect(result.documentation).toContain('# Technical Specifications');
+      expect(result.documentation).toContain('# Business Context');
+      expect(result.documentation).toContain('# Data Flow');
       expect(result.documentation).toContain('Multi-Agent Pipeline');
-      expect(result.sections).toBe(6);
+      expect(result.sections).toBe(14);
     });
 
     test('returns RESOURCE_LIST documentation with 3 sections', async () => {
@@ -149,6 +160,8 @@ describe('WriterAgent', () => {
       jest.spyOn(agent, 'writeSecuritySection').mockResolvedValue('# Security');
       jest.spyOn(agent, 'writeSetupUsage').mockResolvedValue('# Setup & Usage');
       jest.spyOn(agent, 'writeTechnicalModules').mockResolvedValue('# Technical Specifications');
+      jest.spyOn(agent, 'writeBusinessModel').mockResolvedValue('# Business Context');
+      jest.spyOn(agent, 'writeDataFlow').mockResolvedValue('# Data Flow');
 
       const result = await agent.execute({
         input: {
@@ -221,7 +234,7 @@ describe('WriterAgent', () => {
 
     test('calls callLLM with security prompt', async () => {
       jest.spyOn(agent, 'callLLM').mockResolvedValue('## Security\nJWT used');
-      const result = await agent.writeSecuritySection([], ['jwt', 'auth']);
+      const result = await agent.writeSecuritySection([], ['jwt', 'auth'], [], 'BACKEND', 'DEVELOPER');
       expect(result).toContain('Security');
     });
   });
@@ -231,7 +244,7 @@ describe('WriterAgent', () => {
 
     test('calls callLLM with setup prompt', async () => {
       jest.spyOn(agent, 'callLLM').mockResolvedValue('## Setup & Usage\nnpm install');
-      const result = await agent.writeSetupUsage('test-repo', 'BACKEND', ['express']);
+      const result = await agent.writeSetupUsage('test-repo', 'BACKEND', ['express'], []);
       expect(result).toContain('Setup');
     });
   });
@@ -241,7 +254,7 @@ describe('WriterAgent', () => {
 
     test('calls callLLM with technical specs prompt', async () => {
       jest.spyOn(agent, 'callLLM').mockResolvedValue('## Technical Specifications\nModules');
-      const result = await agent.writeTechnicalModules('module summary', 'BACKEND');
+      const result = await agent.writeTechnicalModules('module summary', 'BACKEND', 'DEVELOPER');
       expect(result).toContain('Technical Specifications');
     });
   });

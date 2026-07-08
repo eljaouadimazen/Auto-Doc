@@ -107,6 +107,7 @@ CRITICAL RULE — NEVER use hedging or uncertain language:
       projectProgress     = '',
       forbiddenSections   = [],
       godNodes            = [],
+      manifestDependencies = [],
     } = agentInput.input;
 
     const { repository } = agentInput.context;
@@ -162,7 +163,7 @@ CRITICAL RULE — NEVER use hedging or uncertain language:
       tasks.deployment = this.writeDeployment(fileAnalyses, logicSignals, projectNature, targetAudience);
     }
     if (sections.includes('dependencies')) {
-      tasks.dependencies = this.writeDependencies(fileAnalyses, projectNature, targetAudience);
+      tasks.dependencies = this.writeDependencies(fileAnalyses, projectNature, targetAudience, manifestDependencies);
     }
 
     const results = await Promise.all(Object.values(tasks));
@@ -705,8 +706,34 @@ Base every claim on the files and configs listed above. Never use hedging langua
 Base every claim on the files and configs listed above. Never use hedging language.`}`);
   }
 
-  async writeDependencies(fileAnalyses, nature, audience) {
+  async writeDependencies(fileAnalyses, nature, audience, manifestDependencies = []) {
     if (audience !== 'DEVELOPER') return null;
+
+    // Prefer real manifest data (pom.xml, package.json, etc.) — actual
+    // package coordinates and versions — over import statements scraped
+    // from the handful of files CodeIntelligenceAgent had budget to analyze.
+    if (manifestDependencies.length > 0) {
+      const manifestList = manifestDependencies
+        .map(m => `**${m.ecosystem}** (\`${m.file}\`):\n${m.dependencies.map(d => `- ${d}`).join('\n')}`)
+        .join('\n\n');
+
+      return this.callLLM(`Write a "## Dependencies" section for developers.
+
+Project type: ${nature}
+Dependencies detected from manifest file(s):
+
+${manifestList}
+
+Group the dependencies by category:
+1. **Framework & Runtime** - web framework, language runtime
+2. **Security & Auth** - authentication, encryption, security middleware
+3. **Database & ORM** - database drivers, ORM libraries
+4. **Testing** - test frameworks, assertion libraries
+5. **Build & Dev Tools** - build tools, dev servers, linters
+6. **Other** - remaining dependencies
+
+For each group, list the dependencies with their version where given, and briefly describe their role. Base this ONLY on the manifest dependencies listed above. Never use hedging language.`);
+    }
 
     const allDeps = fileAnalyses.flatMap(f => f.dependencies || []);
     const uniqueDeps = [...new Set(allDeps)].sort();

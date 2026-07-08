@@ -14,7 +14,8 @@ const sanitizerService = require('../services/sanitizer.service');
 const ALLOWED_EXTENSIONS = new Set([
   '.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.go', '.rb',
   '.json', '.md', '.html', '.css', '.env', '.pem', '.key',
-  '.txt', '.conf', '.yml', '.yaml'
+  '.txt', '.conf', '.yml', '.yaml',
+  '.xml', '.mod', '.toml'
 ]);
 const SKIP_DIRS    = new Set(['node_modules', 'dist', 'build', '.git', '.github', 'vendor']);
 const MAX_FILE_SIZE = 100_000;
