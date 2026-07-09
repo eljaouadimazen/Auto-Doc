@@ -1,1 +1,3 @@
 CVE-2026-33671
+# npm-bundled dependency (sigstore), not used by app at runtime
+CVE-2026-48815
