@@ -19,7 +19,8 @@ LABEL org.opencontainers.image.source="https://github.com/mazeneljaouadi/safe-fi
 
 COPY client/nginx.conf.template /etc/nginx/conf.d/default.conf.template
 
-RUN apk add --no-cache envsubst
+RUN apk add --no-cache envsubst && \
+    apk upgrade --no-cache libexpat
 
 COPY --from=builder /public /usr/share/nginx/html
 
