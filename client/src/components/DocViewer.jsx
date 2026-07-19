@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useMemo, useCallback } from 'react'
 import DOMPurify from 'dompurify'
 import { marked } from 'marked'
 import mermaid from 'mermaid'
+mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose', fontFamily: 'system-ui' })
 import { useDebounce } from '@/hooks/useDebounce'
 
 const THEME_KEY = 'ghp-docs-theme'
@@ -99,33 +100,51 @@ export default function DocViewer({ markdown, repoName, onClose }) {
   useEffect(() => {
     if (!contentRef.current) return
 
-    const codeBlocks = contentRef.current.querySelectorAll('pre code.language-mermaid')
-    codeBlocks.forEach(codeEl => {
-      const pre = codeEl.closest('pre')
-      if (!pre) return
-      const container = document.createElement('div')
-      container.className = 'mermaid-container'
-      const div = document.createElement('div')
-      div.className = 'mermaid'
-      div.textContent = codeEl.textContent
-      container.appendChild(div)
-      pre.replaceWith(container)
-    })
+    const root = contentRef.current
 
-    const mermaidDivs = Array.from(contentRef.current.querySelectorAll('.mermaid:not([data-processed])'))
-    ;(async () => {
+    const renderMermaidBlocks = async () => {
+      const codeBlocks = root.querySelectorAll('pre code.language-mermaid')
+      for (const codeEl of codeBlocks) {
+        if (codeEl.dataset.mermaidReplaced) continue
+        codeEl.dataset.mermaidReplaced = 'true'
+
+        const pre = codeEl.closest('pre')
+        if (!pre) continue
+        const diagram = (codeEl.textContent || '').trim()
+        if (!diagram) continue
+
+        const container = document.createElement('div')
+        container.className = 'mermaid-container'
+        const div = document.createElement('div')
+        div.className = 'mermaid'
+        div.textContent = diagram
+        container.appendChild(div)
+        pre.replaceWith(container)
+      }
+
+      const mermaidDivs = root.querySelectorAll('.mermaid:not([data-processed])')
+      if (mermaidDivs.length === 0) return
+
       for (const div of mermaidDivs) {
         try {
           await mermaid.run({ nodes: [div] })
         } catch (err) {
-          console.warn('Mermaid render error:', err)
           const container = div.parentNode
           if (container) {
-            container.innerHTML = '<div style="padding:12px;color:#ef4444;font-size:13px;font-family:monospace;text-align:center">⚠ ' + (err.message || 'Diagram syntax error') + '</div>'
+            container.innerHTML = `<div style="padding:12px;color:#ef4444;font-size:13px;font-family:monospace;text-align:center">⚠ ${err.message || 'Diagram syntax error'}</div>`
           }
         }
       }
-    })()
+    }
+
+    renderMermaidBlocks()
+
+    const observer = new MutationObserver(() => {
+      renderMermaidBlocks()
+    })
+    observer.observe(root, { childList: true, subtree: true })
+
+    return () => observer.disconnect()
   }, [highlightHtml])
 
   useEffect(() => {
@@ -249,7 +268,7 @@ export default function DocViewer({ markdown, repoName, onClose }) {
               '--doc-bg-mark': isDark ? '#854d0e' : '#fef3c7',
               '--doc-bg-mermaid': '#1e293b',
             }}
-            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightHtml) }}
+            dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(highlightHtml, { ADD_ATTR: ['class'], ADD_TAGS: ['svg', 'path', 'g', 'circle', 'rect', 'line', 'text', 'polygon', 'polyline', 'ellipse', 'defs', 'clipPath', 'linearGradient', 'stop', 'marker', 'use', 'foreignObject'] }) }}
           />
           <div style={{
             ...styles.footer,

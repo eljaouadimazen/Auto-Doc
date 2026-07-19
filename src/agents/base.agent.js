@@ -26,6 +26,9 @@ const PROVIDER_MODELS = {
 };
 
 class BaseAgent {
+  // Rate limiter: per-provider promise chain to serialise calls and avoid bursting past quotas
+  static _queues = {};
+
   /**
    * @param {string} name         - Agent name (used in traces and logs)
    * @param {string} systemPrompt - The agent's role and instructions
@@ -177,6 +180,19 @@ class BaseAgent {
    * @returns {string} LLM response text
    */
   async callLLM(userPrompt) {
+    // ── Rate limiter: per-provider promise chain to serialise calls ──
+    const provider = this._currentProvider || this.provider;
+    const delayMs = parseInt(process.env.LLM_CALL_DELAY_MS, 10) || 0;
+    if (delayMs > 0) {
+      const hadQueue = !!BaseAgent._queues[provider];
+      const prev = BaseAgent._queues[provider] || Promise.resolve();
+      BaseAgent._queues[provider] = prev.then(() => this.sleep(delayMs));
+      if (hadQueue) {
+        console.info(`[${this.name}] Rate-limit delay queued (${provider})`);
+      }
+      await prev;
+    }
+
     const messages = [
       new SystemMessage(this.systemPrompt),
       new HumanMessage(userPrompt)
@@ -184,7 +200,6 @@ class BaseAgent {
 
     // Use per-request provider/key if set by run()
     if (this._currentApiKey || this._currentProvider) {
-      const provider = this._currentProvider || this.provider;
       const dynamicLlm = BaseAgent._createLlm(
         provider,
         this._currentApiKey,
