@@ -45,8 +45,10 @@ describe('DiagramService', () => {
   describe('_patterns', () => {
     test('returns CLASS patterns by default', () => {
       const patterns = diagramService._patterns('CLASS');
-      expect(patterns.primary).toContain('service');
-      expect(patterns.primary).toContain('controller');
+      expect(patterns.primary).toContain('entity');
+      expect(patterns.primary).toContain('model');
+      expect(patterns.secondary).toContain('service');
+      expect(patterns.secondary).toContain('controller');
       expect(patterns.secondary).toContain('middleware');
     });
 
@@ -66,7 +68,8 @@ describe('DiagramService', () => {
 
     test('falls back to CLASS for unknown type', () => {
       const patterns = diagramService._patterns('UNKNOWN');
-      expect(patterns.primary).toContain('service');
+      expect(patterns.primary).toContain('entity');
+      expect(patterns.secondary).toContain('service');
     });
   });
 

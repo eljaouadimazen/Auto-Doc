@@ -67,15 +67,15 @@ describe('EnforcedOrchestrator', () => {
       expect(result.length).toBeLessThanOrEqual(25);
     });
 
-    test('sorts files by score placing app files first', () => {
+    test('sorts files by score placing entity files first, then service/controller, then app/main', () => {
       const files = [
-        makeFile('src/service.js'),
+        makeFile('src/model/User.java'),
+        makeFile('src/service/UserService.java'),
         makeFile('src/app.js'),
-        makeFile('src/main.ts'),
       ];
       const result = orchestrator.filterHighSignalFiles(files);
-      expect(result[0].path).toMatch(/app\.js/);
-      expect(result[1].path).toMatch(/main\.ts/);
+      expect(result[0].path).toMatch(/User\.java/);
+      expect(result[1].path).toMatch(/UserService\.java/);
     });
 
     test('handles empty input', () => {
@@ -93,50 +93,39 @@ describe('EnforcedOrchestrator', () => {
   });
 
   describe('fileScore', () => {
-    test('returns 0 for app.js', () => {
-      expect(orchestrator.fileScore('src/app.js')).toBe(0);
+    test('returns 0 for entity/model/domain files', () => {
+      expect(orchestrator.fileScore('src/model/User.java')).toBe(0);
+      expect(orchestrator.fileScore('src/entity/Post.java')).toBe(0);
+      expect(orchestrator.fileScore('src/domain/Order.java')).toBe(0);
+      expect(orchestrator.fileScore('src/dto/UserDto.java')).toBe(0);
     });
 
-    test('returns 0 for app.ts', () => {
-      expect(orchestrator.fileScore('src/app.ts')).toBe(0);
+    test('returns 1 for controller/service/repository files', () => {
+      expect(orchestrator.fileScore('src/controllers/user.controller.js')).toBe(1);
+      expect(orchestrator.fileScore('src/controllers/AuthController.ts')).toBe(1);
+      expect(orchestrator.fileScore('src/services/user.service.js')).toBe(1);
+      expect(orchestrator.fileScore('src/services/AuthService.ts')).toBe(1);
+      expect(orchestrator.fileScore('src/repositories/UserRepository.java')).toBe(1);
+      expect(orchestrator.fileScore('src/dao/UserDao.java')).toBe(1);
     });
 
-    test('returns 0 for app.py', () => {
-      expect(orchestrator.fileScore('app.py')).toBe(0);
-    });
-
-    test('returns 0 for main.java', () => {
-      expect(orchestrator.fileScore('src/main/java/com/example/Main.java')).toBe(0);
-    });
-
-    test('returns 2 for controller files', () => {
-      expect(orchestrator.fileScore('src/controllers/user.controller.js')).toBe(2);
-      expect(orchestrator.fileScore('src/controllers/AuthController.ts')).toBe(2);
-    });
-
-    test('returns 3 for service files', () => {
-      expect(orchestrator.fileScore('src/services/user.service.js')).toBe(3);
-      expect(orchestrator.fileScore('src/services/AuthService.ts')).toBe(3);
+    test('returns 3 for app/main entry points and manifest files', () => {
+      expect(orchestrator.fileScore('src/app.js')).toBe(3);
+      expect(orchestrator.fileScore('src/app.ts')).toBe(3);
+      expect(orchestrator.fileScore('app.py')).toBe(3);
+      expect(orchestrator.fileScore('src/main/java/com/example/Main.java')).toBe(3);
+      expect(orchestrator.fileScore('pom.xml')).toBe(3);
+      expect(orchestrator.fileScore('build.gradle')).toBe(3);
+      expect(orchestrator.fileScore('package.json')).toBe(3);
+      expect(orchestrator.fileScore('requirements.txt')).toBe(3);
+      expect(orchestrator.fileScore('go.mod')).toBe(3);
+      expect(orchestrator.fileScore('Cargo.toml')).toBe(3);
     });
 
     test('returns 7 for other files', () => {
       expect(orchestrator.fileScore('src/utils/helper.js')).toBe(7);
       expect(orchestrator.fileScore('src/middleware/auth.middleware.ts')).toBe(7);
       expect(orchestrator.fileScore('src/config/database.js')).toBe(7);
-    });
-
-    test('returns 0 for manifest files regardless of directory depth', () => {
-      expect(orchestrator.fileScore('pom.xml')).toBe(0);
-      expect(orchestrator.fileScore('build.gradle')).toBe(0);
-      expect(orchestrator.fileScore('package.json')).toBe(0);
-      expect(orchestrator.fileScore('requirements.txt')).toBe(0);
-      expect(orchestrator.fileScore('go.mod')).toBe(0);
-      expect(orchestrator.fileScore('Cargo.toml')).toBe(0);
-    });
-
-    test('returns 2 for repository/DAO files, same tier as controllers', () => {
-      expect(orchestrator.fileScore('src/repositories/UserRepository.java')).toBe(2);
-      expect(orchestrator.fileScore('src/dao/UserDao.java')).toBe(2);
     });
   });
 
@@ -391,53 +380,5 @@ describe('EnforcedOrchestrator', () => {
     });
   });
 
-  describe('pruneNonCodeFiles', () => {
-    let tmpDir;
 
-    beforeEach(() => {
-      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'prune-test-'));
-    });
-
-    afterEach(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    });
-
-    test('deletes PDFs and images but keeps code files', () => {
-      fs.writeFileSync(path.join(tmpDir, 'Foo.java'), 'class Foo {}');
-      fs.writeFileSync(path.join(tmpDir, 'rapport.pdf'), 'fake pdf');
-      fs.writeFileSync(path.join(tmpDir, 'diagram.png'), 'fake image');
-
-      orchestrator.pruneNonCodeFiles(tmpDir);
-
-      expect(fs.existsSync(path.join(tmpDir, 'Foo.java'))).toBe(true);
-      expect(fs.existsSync(path.join(tmpDir, 'rapport.pdf'))).toBe(false);
-      expect(fs.existsSync(path.join(tmpDir, 'diagram.png'))).toBe(false);
-    });
-
-    test('recurses into subdirectories', () => {
-      const nested = path.join(tmpDir, 'src', 'main', 'resources');
-      fs.mkdirSync(nested, { recursive: true });
-      fs.writeFileSync(path.join(nested, 'logo.svg'), 'fake svg');
-      fs.writeFileSync(path.join(nested, 'App.java'), 'class App {}');
-
-      orchestrator.pruneNonCodeFiles(tmpDir);
-
-      expect(fs.existsSync(path.join(nested, 'logo.svg'))).toBe(false);
-      expect(fs.existsSync(path.join(nested, 'App.java'))).toBe(true);
-    });
-
-    test('does not descend into .git', () => {
-      const gitDir = path.join(tmpDir, '.git');
-      fs.mkdirSync(gitDir, { recursive: true });
-      fs.writeFileSync(path.join(gitDir, 'should-not-touch.pdf'), 'fake pdf');
-
-      orchestrator.pruneNonCodeFiles(tmpDir);
-
-      expect(fs.existsSync(path.join(gitDir, 'should-not-touch.pdf'))).toBe(true);
-    });
-
-    test('does not throw for a non-existent directory', () => {
-      expect(() => orchestrator.pruneNonCodeFiles(path.join(tmpDir, 'missing'))).not.toThrow();
-    });
-  });
 });

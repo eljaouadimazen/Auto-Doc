@@ -142,12 +142,19 @@ export default function Pipeline() {
   useEffect(() => {
     if (tab !== 'rendered' || !renderedRef.current) return
 
-    const timer = setTimeout(async () => {
-      const codeBlocks = renderedRef.current.querySelectorAll('pre code.language-mermaid, code.language-mermaid')
+    const root = renderedRef.current
 
-      codeBlocks.forEach(codeEl => {
+    const renderMermaidBlocks = async () => {
+      const codeBlocks = root.querySelectorAll('pre code.language-mermaid, code.language-mermaid')
+      if (codeBlocks.length === 0) return
+
+      for (const codeEl of codeBlocks) {
+        if (codeEl.dataset.mermaidReplaced) continue
+        codeEl.dataset.mermaidReplaced = 'true'
+
         const pre = codeEl.closest('pre') || codeEl
-        const diagram = codeEl.textContent || codeEl.innerText
+        const diagram = (codeEl.textContent || codeEl.innerText).trim()
+        if (!diagram) continue
 
         const mermaidContainer = document.createElement('div')
         mermaidContainer.className = 'mermaid-container'
@@ -156,25 +163,31 @@ export default function Pipeline() {
         mermaidDiv.textContent = diagram
         mermaidContainer.appendChild(mermaidDiv)
         pre.replaceWith(mermaidContainer)
-      })
+      }
 
-      const mermaidDivs = renderedRef.current.querySelectorAll('.mermaid:not([data-processed])')
-      if (mermaidDivs.length > 0) {
-        for (const div of mermaidDivs) {
-          try {
-            await mermaid.run({ nodes: [div] })
-          } catch (err) {
-            console.warn('Mermaid render error:', err)
-            const container = div.parentNode
-            if (container) {
-              container.innerHTML = '<div style="padding:12px;color:#ef4444;font-size:13px;font-family:monospace;text-align:center">⚠ ' + (err.message || 'Diagram syntax error') + '</div>'
-            }
+      const mermaidDivs = root.querySelectorAll('.mermaid:not([data-processed])')
+      if (mermaidDivs.length === 0) return
+
+      for (const div of mermaidDivs) {
+        try {
+          await mermaid.run({ nodes: [div] })
+        } catch (err) {
+          const container = div.parentNode
+          if (container) {
+            container.innerHTML = `<div style="padding:12px;color:#ef4444;font-size:13px;font-family:monospace;text-align:center">⚠ ${err.message || 'Diagram syntax error'}</div>`
           }
         }
       }
-    }, 100)
+    }
 
-    return () => clearTimeout(timer)
+    renderMermaidBlocks()
+
+    const observer = new MutationObserver(() => {
+      renderMermaidBlocks()
+    })
+    observer.observe(root, { childList: true, subtree: true })
+
+    return () => observer.disconnect()
   }, [tab, output])
 
   const fetchRepo = async () => {
@@ -468,7 +481,7 @@ export default function Pipeline() {
 
   const renderMarkdown = (text) => {
     try {
-      return marked.parse(text)
+      return marked.parse(text, { gfm: true, breaks: true })
     } catch {
       return text
     }

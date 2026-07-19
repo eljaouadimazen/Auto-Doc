@@ -102,6 +102,7 @@ CRITICAL RULE — NEVER use hedging or uncertain language:
       fileAnalyses        = [],
       securityResults     = [],
       architectureDiagram = null,
+      stakeholderDiagram  = null,
       targetAudience      = 'DEVELOPER',
       businessModel       = '',
       projectProgress     = '',
@@ -125,7 +126,7 @@ CRITICAL RULE — NEVER use hedging or uncertain language:
       tasks.overview = this.writeOverview(repository, projectNature, logicSignals, moduleSummary, targetAudience, godNodes);
     }
     if (sections.includes('architecture')) {
-      tasks.architecture = this.writeArchitecture(projectNature, logicSignals, fileAnalyses, architectureDiagram, targetAudience, godNodes);
+      tasks.architecture = this.writeArchitecture(projectNature, logicSignals, fileAnalyses, architectureDiagram, targetAudience, godNodes, stakeholderDiagram);
     }
     if (docStrategy === 'LIBRARY' && targetAudience === 'DEVELOPER') {
       tasks.library_ref = this.writeLibraryReference(fileAnalyses, projectNature, logicSignals, techStack);
@@ -222,7 +223,7 @@ ${audienceInstruction}
 Write 3-5 sentences. Use definitive language based ONLY on the data provided. Never use hedging words.`);
   }
 
-  async writeArchitecture(nature, signals, fileAnalyses, architectureDiagram, audience, godNodes = []) {
+  async writeArchitecture(nature, signals, fileAnalyses, architectureDiagram, audience, godNodes = [], stakeholderDiagram = null) {
     const layers = this.inferLayers(fileAnalyses);
     const typeGuide = this.typeFocus('architecture', nature);
 
@@ -245,8 +246,9 @@ ${depthInstruction}
 
 Base your description ONLY on the provided layer data.`);
 
+    let result = architectureText;
     if (architectureDiagram) {
-      return `${architectureText}
+      result += `
 
 ### Architecture Visualization
 
@@ -254,8 +256,19 @@ Base your description ONLY on the provided layer data.`);
 ${architectureDiagram}
 \`\`\``;
     }
+    if (stakeholderDiagram) {
+      const heading = audience === 'PROJECT_MANAGER' || audience === 'PRODUCT_OWNER'
+        ? '### System Context (C4 Container View)'
+        : '### Stakeholder View';
+      result += `
 
-    return architectureText;
+${heading}
+
+\`\`\`mermaid
+${stakeholderDiagram}
+\`\`\``;
+    }
+    return result;
   }
 
   async writeAPIReference(fileAnalyses, nature, audience) {

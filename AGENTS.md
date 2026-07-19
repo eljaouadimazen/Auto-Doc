@@ -26,13 +26,15 @@ npm ci --legacy-peer-deps
 - **No test suite**: `npm test` exits with error
 
 ## Environment
-- `GROQ_API_KEY` (required) — Groq API key for LLM access
+- `GROQ_API_KEY` (optional) — Groq API key for LLM access (not needed for Ollama)
 - `GITHUB_TOKEN` (optional) — raises GitHub API rate limit from 60 to 5000 req/hour
 - `GROQ_MODEL` (optional, default `llama-3.3-70b-versatile`)
+- `OLLAMA_MODEL` (optional, default `tinyllama`; currently set to `llama3.2:3b` in devops/.env)
 - `REPO_URL` (optional, used in CI headless mode)
 - `LANGSMITH_*` (optional) — LangChain tracing: `LANGSMITH_TRACING`, `LANGSMITH_ENDPOINT`, `LANGSMITH_API_KEY`, `LANGSMITH_PROJECT`
 - `graphifyy` (required for graph-backed generation) — Python CLI, install via `uv tool install graphifyy`; replaced the old Pinecone vector DB
 - `GRAPHFIY_TIMEOUT` (optional, default `300000`) — ms timeout for graphify pass
+- `LLM_CALL_DELAY_MS` (optional, default `0`) — ms delay between calls to avoid cloud API rate limits; not needed for Ollama (local)
 
 ## Async jobs
 - **`GET /job/:jobId`** — poll for status of async doc generation (used when `githubUrl` is provided in agentic mode; graphify + LLM pipeline can take minutes)

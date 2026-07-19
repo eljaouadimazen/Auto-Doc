@@ -1,57 +1,40 @@
-const { exec } = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const util = require('util');
-
 const BaseAgent               = require('./base.agent');
 const RepoAnalyzerAgent       = require('./repo-analyzer.agent');
 const CodeIntelligenceAgent   = require('./code-intelligence.agent');
 const SecurityAgent           = require('./security.agent');
 const WriterAgent             = require('./writer.agent');
 const DiagramAgent            = require('./diagram.agent');
+const GraphifyService         = require('../services/graphify.service');
+const factExtractor           = require('../services/fact-extractor.service');
 const diagramService          = require('../services/diagram.service');
 const protocol                = require('./protocol');
-const GraphService            = require('../services/graph.service');
 const manifestParserService   = require('../services/manifest-parser.service');
 
-const execAsync = util.promisify(exec);
 const CODE_INTEL_LIMIT = 10;
 
-// Files graphify treats as "doc/paper/image" — requires an LLM key for
-// semantic extraction and hard-fails without one. Auto-Doc's own pipeline
-// never uses these either, so they're pruned before graphify ever sees them.
-const NON_CODE_EXTENSIONS = new Set([
-  '.pdf', '.doc', '.docx', '.ppt', '.pptx', '.xls', '.xlsx', '.odt', '.odp', '.ods',
-  '.png', '.jpg', '.jpeg', '.gif', '.bmp', '.webp', '.svg', '.ico', '.tiff',
-  '.mp4', '.mov', '.avi', '.mp3', '.wav',
-]);
-
-const GRAPHIFY_BIN = (() => {
-  const envBin = process.env.GRAPHFIY_BIN;
-  if (envBin) return envBin;
-  const candidates = [
-    'graphify',
-    path.join(os.homedir(), '.local', 'bin', 'graphify'),
-    '/usr/local/bin/graphify',
-  ];
-  for (const c of candidates) {
-    try { fs.accessSync(c, fs.constants.X_OK); return c; } catch {}
-  }
-  return 'graphify';
-})();
-
-function selectTemplate(projectNature) {
-  const mapping = {
-    BACKEND:       { templateId: 'FULL_SOFTWARE', diagramType: 'CLASS',       forbiddenSections: [] },
-    FRONTEND:      { templateId: 'FULL_SOFTWARE', diagramType: 'COMPONENT',   forbiddenSections: [] },
-    FULLSTACK:     { templateId: 'FULL_SOFTWARE', diagramType: 'CLASS',       forbiddenSections: [] },
-    MOBILE:        { templateId: 'FULL_SOFTWARE', diagramType: 'COMPONENT',   forbiddenSections: [] },
-    DEVOPS:        { templateId: 'FULL_SOFTWARE', diagramType: 'PIPELINE',    forbiddenSections: ['api', 'entities', 'error_handling', 'data_flow', 'configuration'] },
-    LIBRARY:       { templateId: 'LIBRARY',       diagramType: 'CLASS',       forbiddenSections: ['api', 'entities', 'deployment', 'data_flow', 'error_handling', 'configuration'] },
-    RESOURCE_LIST: { templateId: 'RESOURCE_LIST',  diagramType: 'NONE',       forbiddenSections: [] },
+function selectTemplate(projectNature, targetAudience) {
+  const templateMap = {
+    BACKEND:       { templateId: 'FULL_SOFTWARE', forbiddenSections: [] },
+    FRONTEND:      { templateId: 'FULL_SOFTWARE', forbiddenSections: [] },
+    FULLSTACK:     { templateId: 'FULL_SOFTWARE', forbiddenSections: [] },
+    MOBILE:        { templateId: 'FULL_SOFTWARE', forbiddenSections: [] },
+    DEVOPS:        { templateId: 'FULL_SOFTWARE', forbiddenSections: ['api', 'entities', 'error_handling', 'data_flow', 'configuration'] },
+    LIBRARY:       { templateId: 'LIBRARY',       forbiddenSections: ['api', 'entities', 'deployment', 'data_flow', 'error_handling', 'configuration'] },
+    RESOURCE_LIST: { templateId: 'RESOURCE_LIST', forbiddenSections: [] },
   };
-  return mapping[projectNature] || { templateId: 'FULL_SOFTWARE', diagramType: 'NONE', forbiddenSections: [] };
+  const base = templateMap[projectNature] || { templateId: 'FULL_SOFTWARE', forbiddenSections: [] };
+
+  const isStakeholder = targetAudience === 'PROJECT_MANAGER' || targetAudience === 'PRODUCT_OWNER';
+  const diagramType = isStakeholder ? 'C4_CONTAINER' : (() => {
+    const natureMap = {
+      BACKEND: 'CLASS', FRONTEND: 'COMPONENT', FULLSTACK: 'CLASS',
+      MOBILE: 'COMPONENT', DEVOPS: 'PIPELINE', LIBRARY: 'CLASS',
+      RESOURCE_LIST: 'NONE',
+    };
+    return natureMap[projectNature] || 'NONE';
+  })();
+
+  return { ...base, diagramType };
 }
 
 class EnforcedOrchestrator extends BaseAgent {
@@ -81,10 +64,20 @@ class EnforcedOrchestrator extends BaseAgent {
 
     // ── Stage 1: Filter high-signal files ──────────────────────────────
     const contextFiles = this.filterHighSignalFiles(files);
+    console.info(`[Orchestrator] Stage 1: ${contextFiles.length} files selected (from ${files.length} total)`);
+    if (contextFiles.length > 0) {
+      console.info(`[Orchestrator]   contextFiles[0..4]:`, contextFiles.slice(0, 5).map(f => `${f.path} (${(f.content || '').length}c)`));
+    }
     this.onProgress({ stage: 1, message: `${contextFiles.length} files selected after filtering` });
 
     // ── Stage 2: Security gate ─────────────────────────────────────────
     const safeFiles = await this.runSecurityGate(contextFiles, agentInput.context, apiKey);
+    console.info(`[Orchestrator] Stage 2: ${safeFiles.length} files cleared security gate (from ${contextFiles.length})`);
+    if (safeFiles.length > 0) {
+      console.info(`[Orchestrator]   safeFiles[0..4]:`, safeFiles.slice(0, 5).map(f => `${f.path} (${(f.content || '').length}c)`));
+    } else {
+      console.warn(`[Orchestrator]   ALL files filtered by security gate!`);
+    }
     this.onProgress({ stage: 2, message: `${safeFiles.length} files cleared security gate` });
 
     // ── Manifest parsing (deterministic, no LLM) ────────────────────────
@@ -92,8 +85,11 @@ class EnforcedOrchestrator extends BaseAgent {
 
     // ── Graphify: Clone repo and build knowledge graph ─────────────────
     let graphService = null;
+    let graphStats = null;
     if (githubUrl) {
-      graphService = await this.runGraphify(githubUrl);
+      const result = await new GraphifyService().extract(githubUrl, { onProgress: this.onProgress });
+      graphService = result.graphService;
+      graphStats = result.stats;
     }
 
     // ── Stage 3: Repo Analyzer ─────────────────────────────────────────
@@ -138,47 +134,12 @@ class EnforcedOrchestrator extends BaseAgent {
     }
 
     // ── Stage 4: Template + Diagram Selection (deterministic) ─────────
-    const template = selectTemplate(projectNature);
+    const template = selectTemplate(projectNature, targetAudience);
     const { templateId, diagramType } = template;
     const forbiddenSections = clientForbiddenSections || template.forbiddenSections;
     this.onProgress({ stage: 4, message: `Template: ${templateId}, Diagram: ${diagramType}` });
 
-    // ── Stage 7: Diagram Generation ──────────────────────────────────────
     let architectureDiagram = null;
-    if (diagramType && diagramType !== 'NONE' && hasExecutableCode) {
-      this.onProgress({ stage: 7, message: `Synthesizing ${diagramType} diagram...` });
-
-      const diagramFiles = diagramService.filterHighSignalFiles(safeFiles, diagramType);
-      let retrievalFiles = [];
-      if (graphService) {
-        const diagramPaths = diagramFiles.map(f => f.path);
-        const seen = new Set();
-        for (const dp of diagramPaths) {
-          const related = graphService.getRelatedFiles(dp, { filterAmbiguous: true });
-          for (const r of related) {
-            if (!seen.has(r.path)) {
-              seen.add(r.path);
-              retrievalFiles.push(r);
-            }
-          }
-        }
-      }
-      const diagramInput = protocol.buildInput(
-        'Generate architectural visualization',
-        { ...agentInput.context, apiKey },
-        {
-          diagramType,
-          projectNature,
-          files: diagramFiles.map(f => ({ path: f.path, content: f.content })),
-          retrievalFiles: retrievalFiles.map(f => ({ path: f.path, relationType: f.relationType }))
-        }
-      );
-
-      const diagramResult = await this.diagramAgent.run(diagramInput);
-      if (diagramResult.status === 'success') {
-        architectureDiagram = diagramResult.result;
-      }
-    }
 
     // ── Stage 5: Code Intelligence ──────────────────────────────────────
     let fileAnalyses = [];
@@ -193,6 +154,42 @@ class EnforcedOrchestrator extends BaseAgent {
         graphService
       );
       this.onProgress({ stage: 5, message: `Code intelligence done on ${fileAnalyses.length} files` });
+    }
+
+    // ── Stage 7: Diagram Generation (after code intel for richer facts) ─
+    if (diagramType && diagramType !== 'NONE' && hasExecutableCode) {
+      this.onProgress({ stage: 7, message: `Synthesizing ${diagramType} diagram...` });
+
+      let diagramFiles;
+      if (diagramType === 'CLASS') {
+        diagramFiles = diagramService.filterHighSignalFiles(files, 'CLASS', graphService);
+        console.info(`[Orchestrator] Stage 7 (CLASS, bypass filter+gate): diagramFiles=${diagramFiles.length} (allFiles=${files.length})`);
+      } else {
+        diagramFiles = diagramService.filterHighSignalFiles(safeFiles, diagramType, graphService);
+        console.info(`[Orchestrator] Stage 7: diagramFiles=${diagramFiles.length} (safeFiles=${safeFiles.length}, diagramType=${diagramType})`);
+      }
+      if (diagramFiles.length === 0 && (safeFiles.length > 0 || files.length > 0)) {
+        console.warn(`[Orchestrator]   CRITICAL: All files scored ≤ 0!`);
+      }
+
+      const facts = factExtractor.extract(diagramFiles, diagramType, {
+        graphService,
+        manifestDependencies,
+        techStack,
+        businessModel,
+      });
+      console.info(`[Orchestrator] Facts: ${facts.stats.regexNames} names, ${facts.stats.totalEdges} edges`);
+
+      const diagramInput = protocol.buildInput(
+        'Generate architectural visualization',
+        { ...agentInput.context, apiKey },
+        { diagramType, facts }
+      );
+
+      const diagramResult = await this.diagramAgent.run(diagramInput);
+      if (diagramResult.status === 'success') {
+        architectureDiagram = diagramResult.result;
+      }
     }
 
     // ── Overview: God nodes for landing page ─────────────────────────
@@ -240,71 +237,6 @@ class EnforcedOrchestrator extends BaseAgent {
         graphEnabled: !!graphService,
       }
     };
-  }
-
-  async runGraphify(githubUrl) {
-    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'graphify-'));
-    try {
-      this.onProgress({ stage: 'graphify', message: 'Cloning repository for graph analysis...' });
-      await execAsync(`git clone --depth 1 ${githubUrl} ${tmpDir}/repo`, { timeout: 120000 });
-
-      // Graphify treats PDFs/office docs/images as needing LLM-based semantic
-      // extraction and hard-fails without a compatible API key. None of these
-      // feed Auto-Doc's own documentation anyway — drop them so a code-only
-      // corpus reaches graphify, which needs no key at all.
-      this.pruneNonCodeFiles(`${tmpDir}/repo`);
-
-      this.onProgress({ stage: 'graphify', message: 'Running graphify to build knowledge graph...' });
-      const graphifyTimeout = parseInt(process.env.GRAPHFIY_TIMEOUT, 10) || 300000;
-      await execAsync(`${GRAPHIFY_BIN} .`, { cwd: `${tmpDir}/repo`, timeout: graphifyTimeout });
-
-      const graphPath = path.join(tmpDir, 'repo', 'graphify-out', 'graph.json');
-      if (!fs.existsSync(graphPath)) {
-        console.warn(`[Orchestrator] graph.json not found at ${graphPath} — continuing without graph`);
-        return null;
-      }
-
-      const raw = fs.readFileSync(graphPath, 'utf-8');
-      const graphData = JSON.parse(raw);
-      const gs = new GraphService();
-      gs.loadGraph(graphData);
-      this.onProgress({ stage: 'graphify', message: `Graph loaded: ${gs.nodes.size} nodes, ${gs.edges.length} edges` });
-      return gs;
-
-    } catch (e) {
-      this.onProgress({ stage: 'graphify', message: `Graph unavailable — ${e.message}` });
-      console.warn(`[Orchestrator] Graphify failed (pipeline continues without graph): ${e.message}`);
-      return null;
-    } finally {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
-    }
-  }
-
-  /**
-   * Recursively delete PDFs/office docs/images from a cloned repo before
-   * handing it to graphify, so its scan finds a code-only corpus and never
-   * requires an LLM key for semantic extraction.
-   */
-  pruneNonCodeFiles(dir) {
-    let entries;
-    try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
-    } catch {
-      return;
-    }
-
-    for (const entry of entries) {
-      if (entry.name === '.git') continue;
-      const fullPath = path.join(dir, entry.name);
-
-      if (entry.isDirectory()) {
-        this.pruneNonCodeFiles(fullPath);
-      } else if (NON_CODE_EXTENSIONS.has(path.extname(entry.name).toLowerCase())) {
-        try { fs.unlinkSync(fullPath); } catch (e) {
-          console.warn(`[Orchestrator] Failed to prune ${fullPath}: ${e.message}`);
-        }
-      }
-    }
   }
 
   // ── Helper Methods (Must be inside the class) ────────────────────────
@@ -386,12 +318,20 @@ class EnforcedOrchestrator extends BaseAgent {
     const CRITICAL_EXT = ['.js', '.ts', '.jsx', '.tsx', '.py', '.java', '.go', '.kt', '.dart', '.swift', '.rb', '.php', '.rs', '.vue', '.svelte', '.tf', '.gradle', '.properties', '.yml', '.yaml', '.env', '.xml', '.mod', '.toml', '.txt'];
     const SKIP         = /node_modules|\/dist\/|\/build\/|\.git\//;
 
-    return files
+    const filtered = files
       .filter(f => !SKIP.test(f.path))
       .filter(f => CRITICAL_EXT.some(ext => f.path.endsWith(ext)))
-      .filter(f => f.content && f.content.trim().length > 10)
-      .sort((a, b) => this.fileScore(a.path) - this.fileScore(b.path))
-      .slice(0, 25);
+      .filter(f => f.content && f.content.trim().length > 10);
+
+    const scored = filtered.map(f => ({ ...f, _fs: this.fileScore(f.path) }));
+    const sorted = scored.sort((a, b) => a._fs - b._fs);
+    const top80 = sorted.slice(0, 80);
+
+    console.info(`[Orchestrator] filterHighSignalFiles: ${files.length}→${filtered.length}→${top80.length} | first 5 scores:`, top80.slice(0, 5).map(f => `${f.path} (score=${f._fs})`));
+    console.info(`[Orchestrator]   last 5 of 80:`, top80.slice(-5).map(f => `${f.path} (score=${f._fs})`));
+
+    // Strip debug field before returning
+    return top80.map(({ _fs, ...rest }) => rest);
   }
 
   selectFilesByGraph(files, graphService, limit) {
@@ -446,18 +386,15 @@ class EnforcedOrchestrator extends BaseAgent {
   }
 
   fileScore(p) {
-    if (/(^|\/)(pom\.xml|build\.gradle(\.kts)?|package\.json|requirements\.txt|go\.mod|Cargo\.toml|pyproject\.toml)$/i.test(p)) return 0;
-    if (/app\.(js|ts|java|py|dart|kt)$/i.test(p)) return 0;
-    if (/main\.(js|ts|java|py|dart|kt)$/i.test(p)) return 0;
-    if (/controller/i.test(p)) return 2;
-    if (/service/i.test(p)) return 3;
-    if (/repository|dao/i.test(p)) return 2;
-    if (/component|screen|page/i.test(p)) return 2;
-    if (/main\.dart|AppDelegate|MainActivity/i.test(p)) return 0;
-    if (/main\.tf|provider\.tf|variables\.tf/i.test(p)) return 1;
-    if (/\.github\/workflows/i.test(p)) return 1;
-    if (/Dockerfile|docker-compose/i.test(p)) return 2;
+    if (/entity|model|domain|schema|value-object|persist/i.test(p)) return 0;
+    if (/component|screen|page|view|widget|store|service|api|http|controller|repository|dao/i.test(p)) return 1;
+    if (/(^|\/)(pom\.xml|build\.gradle(\.kts)?|package\.json|requirements\.txt|go\.mod|Cargo\.toml|pyproject\.toml)$/i.test(p)) return 3;
+    if (/app\.(js|ts|java|py|dart|kt)$/i.test(p)) return 3;
+    if (/main\.(js|ts|java|py|dart|kt)$/i.test(p)) return 3;
+    if (/main\.dart|AppDelegate|MainActivity/i.test(p)) return 3;
     if (/build\.gradle|Podfile/i.test(p)) return 3;
+    if (/Dockerfile|docker-compose/i.test(p)) return 3;
+    if (/\.github\/workflows|main\.tf|provider\.tf|variables\.tf/i.test(p)) return 5;
     return 7;
   }
 
