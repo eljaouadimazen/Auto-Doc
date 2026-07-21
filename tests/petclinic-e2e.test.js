@@ -1,10 +1,19 @@
 const fs = require('fs');
 const path = require('path');
+const { execSync } = require('child_process');
 const diagramService = require('../src/services/diagram.service');
 const factExtractor = require('../src/services/fact-extractor.service');
 const MermaidGenerator = require('../src/services/mermaid-generator.service');
 
-const PETCLINIC_DIR = '/tmp/spring-petclinic/src/main/java/org/springframework/samples/petclinic';
+const PETCLINIC_REPO = 'https://github.com/spring-projects/spring-petclinic.git';
+const PETCLINIC_BASE = '/tmp/spring-petclinic';
+const PETCLINIC_DIR = PETCLINIC_BASE + '/src/main/java/org/springframework/samples/petclinic';
+
+function ensurePetclinicData() {
+  if (fs.existsSync(PETCLINIC_BASE)) return;
+  console.log('Cloning Spring Petclinic test data...');
+  execSync('git clone --depth 1 ' + PETCLINIC_REPO + ' ' + PETCLINIC_BASE, { stdio: 'inherit' });
+}
 
 function readPetclinicFiles() {
   const files = [];
@@ -28,6 +37,7 @@ describe('Spring Petclinic End-to-End', () => {
   let allFiles;
 
   beforeAll(() => {
+    ensurePetclinicData();
     allFiles = readPetclinicFiles();
     expect(allFiles.length).toBeGreaterThan(20);
   });

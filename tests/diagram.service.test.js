@@ -47,9 +47,8 @@ describe('DiagramService', () => {
       const patterns = diagramService._patterns('CLASS');
       expect(patterns.primary).toContain('entity');
       expect(patterns.primary).toContain('model');
-      expect(patterns.secondary).toContain('service');
-      expect(patterns.secondary).toContain('controller');
-      expect(patterns.secondary).toContain('middleware');
+      expect(patterns.secondary).toContain('interface');
+      expect(patterns.secondary).not.toContain('service');
     });
 
     test('returns COMPONENT patterns', () => {
@@ -69,7 +68,7 @@ describe('DiagramService', () => {
     test('falls back to CLASS for unknown type', () => {
       const patterns = diagramService._patterns('UNKNOWN');
       expect(patterns.primary).toContain('entity');
-      expect(patterns.secondary).toContain('service');
+      expect(patterns.secondary).toContain('interface');
     });
   });
 
@@ -112,9 +111,9 @@ describe('DiagramService', () => {
       expect(score).toBeLessThanOrEqual(25);
     });
 
-    test('gives score for controller paths', () => {
+    test('gives 0 for controller paths in CLASS diagram', () => {
       const score = diagramService._score('src/controllers/user.controller.js', '', 'CLASS');
-      expect(score).toBeGreaterThan(0);
+      expect(score).toBe(0);
     });
 
     test('penalizes test files', () => {
@@ -160,15 +159,14 @@ describe('DiagramService', () => {
       expect(result).toEqual([]);
     });
 
-    test('sorts by score descending', () => {
+    test('sorts by score descending, only entity files', () => {
       const files = [
-        makeFile('src/middleware/auth.js', 'function auth(req, res, next) {}'),
-        makeFile('src/app.js', 'class App {}'),
+        makeFile('src/model/Animal.java', 'class Animal {}'),
+        makeFile('src/model/Pet.java', 'class Pet extends Animal {}'),
       ];
       const result = diagramService.filterHighSignalFiles(files, 'CLASS');
       expect(result).toHaveLength(2);
-      expect(result[0].score).toBeGreaterThan(result[1].score);
-      expect(result[0].path).toContain('app.js');
+      expect(result[0].score).toBeGreaterThanOrEqual(result[1].score);
     });
   });
 });

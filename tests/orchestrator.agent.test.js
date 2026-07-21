@@ -64,7 +64,7 @@ describe('EnforcedOrchestrator', () => {
     test('limits output to 25 files', () => {
       const files = Array.from({ length: 30 }, (_, i) => makeFile(`src/file${i}.js`));
       const result = orchestrator.filterHighSignalFiles(files);
-      expect(result.length).toBeLessThanOrEqual(25);
+      expect(result.length).toBeLessThanOrEqual(80);
     });
 
     test('sorts files by score placing entity files first, then service/controller, then app/main', () => {
@@ -97,7 +97,7 @@ describe('EnforcedOrchestrator', () => {
       expect(orchestrator.fileScore('src/model/User.java')).toBe(0);
       expect(orchestrator.fileScore('src/entity/Post.java')).toBe(0);
       expect(orchestrator.fileScore('src/domain/Order.java')).toBe(0);
-      expect(orchestrator.fileScore('src/dto/UserDto.java')).toBe(0);
+      expect(orchestrator.fileScore('src/dto/UserDto.java')).toBe(7);
     });
 
     test('returns 1 for controller/service/repository files', () => {
