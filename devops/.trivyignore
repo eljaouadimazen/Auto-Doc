@@ -1,3 +1,8 @@
 CVE-2026-33671
 # npm-bundled dependency (sigstore), not used by app at runtime
 CVE-2026-48815
+# Bundled inside system npm@10.x (node:22-alpine base image), not a project dep
+# Production Dockerfile uses --only=production, and npm is only present as system tool
+CVE-2026-13149
+CVE-2026-59873
+CVE-2026-59874
