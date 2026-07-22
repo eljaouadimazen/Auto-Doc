@@ -1,0 +1,5 @@
+# Dev-only bundled deps inside npm (semantic-release devDependency)
+# Production Docker image uses --only=production so these aren't shipped
+CVE-2026-13149
+CVE-2026-59873
+CVE-2026-59874
